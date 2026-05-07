@@ -215,7 +215,7 @@ async def auth_session(
         claimed = result.modified_count
 
     user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-    return {"user": user_doc, "trips_claimed": claimed}
+    return {"user": user_doc, "trips_claimed": claimed, "session_token": session_token}
 
 
 @api_router.get("/auth/me")
@@ -399,8 +399,8 @@ async def generate_trip(
         raise HTTPException(status_code=502, detail=f"LLM returned malformed JSON: {e}")
 
     trip_id = f"trip-{uuid.uuid4().hex[:10]}"
-    cover_query = trip_json.get("destination", "travel").replace(",", "").replace(" ", "+")
-    cover_url = f"https://source.unsplash.com/featured/1600x900/?{cover_query}"
+    # Cover is left empty — frontend uses a warm gradient fallback when missing.
+    # (Was using deprecated source.unsplash.com which intermittently 404s.)
 
     doc = {
         "trip_id": trip_id,
@@ -408,7 +408,7 @@ async def generate_trip(
         "guest_session_id": guest_session_id,
         "model": used_model,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "trip": {**trip_json, "id": trip_id, "cover": cover_url},
+        "trip": {**trip_json, "id": trip_id, "cover": None},
     }
     await db.trips.insert_one(doc)
 
@@ -499,7 +499,7 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_origin_regex=".*",
     allow_methods=["*"],
     allow_headers=["*"],
 )

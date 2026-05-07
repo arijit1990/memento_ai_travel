@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { api, getGuestSessionId, clearGuestSessionId } from "./api";
+import { api, getGuestSessionId, clearGuestSessionId, setToken, clearToken, getToken } from "./api";
 
 // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
 const EMERGENT_AUTH_URL = "https://auth.emergentagent.com";
@@ -20,10 +20,16 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
+    if (!getToken()) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
     try {
       const r = await api.get("/auth/me");
       setUser(r.data);
     } catch (_e) {
+      clearToken();
       setUser(null);
     } finally {
       setLoading(false);
@@ -52,6 +58,7 @@ export const AuthProvider = ({ children }) => {
     } catch (_e) {
       /* ignore */
     }
+    clearToken();
     clearGuestSessionId();
     setUser(null);
   }, []);
@@ -82,13 +89,15 @@ export const AuthCallback = () => {
     let cancelled = false;
     (async () => {
       try {
-        await api.post("/auth/session", {
+        const resp = await api.post("/auth/session", {
           session_id: sessionId,
           guest_session_id: guestId,
         });
+        if (resp.data?.session_token) {
+          setToken(resp.data.session_token);
+        }
         await refresh();
         if (!cancelled) {
-          // Clear the hash so we don't re-trigger
           window.history.replaceState(null, "", window.location.pathname);
           navigate("/trips", { replace: true });
         }

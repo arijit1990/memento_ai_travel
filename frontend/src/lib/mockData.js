@@ -18,6 +18,8 @@ export const PARIS_TRIP = {
   tripType: "City Break",
   budget: "$3,200",
   spent: "$2,840",
+  centerLat: 48.8566,
+  centerLng: 2.3522,
   vibe: "Romantic, slow-paced, café mornings & gallery afternoons",
   summary:
     "A handcrafted five-day journey through Paris designed for a couple who values art, pastry, and unhurried evenings. Hotels positioned in Le Marais for walkability. Includes one Sunday-museum-free day to savor neighborhoods.",
@@ -70,6 +72,8 @@ export const PARIS_TRIP = {
           title: "Check in — Hôtel Jules & Jim",
           category: "Stay",
           location: "11 Rue des Gravilliers, Le Marais",
+          lat: 48.8635,
+          lng: 2.3534,
           cost: "$210/night",
           icon: "bed",
           image:
@@ -83,6 +87,8 @@ export const PARIS_TRIP = {
           title: "Place des Vosges & Marais stroll",
           category: "Walk",
           location: "Place des Vosges, 4e",
+          lat: 48.8554,
+          lng: 2.3658,
           cost: "Free",
           icon: "footprints",
           image:
@@ -96,6 +102,8 @@ export const PARIS_TRIP = {
           title: "Dinner at Chez Janou",
           category: "Dining",
           location: "2 Rue Roger Verlomme",
+          lat: 48.8553,
+          lng: 2.366,
           cost: "$95 for 2",
           icon: "utensils",
           image:
@@ -117,6 +125,8 @@ export const PARIS_TRIP = {
           title: "Pastry breakfast — Du Pain et des Idées",
           category: "Dining",
           location: "34 Rue Yves Toudic",
+          lat: 48.8703,
+          lng: 2.3635,
           cost: "$14",
           icon: "coffee",
           image:
@@ -130,6 +140,8 @@ export const PARIS_TRIP = {
           title: "Louvre Museum — Skip-the-line",
           category: "Culture",
           location: "Rue de Rivoli, 1e",
+          lat: 48.8606,
+          lng: 2.3376,
           cost: "$22 pp",
           icon: "landmark",
           image:
@@ -143,6 +155,8 @@ export const PARIS_TRIP = {
           title: "Lunch at Café Marly",
           category: "Dining",
           location: "Cour Napoléon",
+          lat: 48.8624,
+          lng: 2.3358,
           cost: "$60",
           icon: "utensils",
           image:
@@ -156,6 +170,8 @@ export const PARIS_TRIP = {
           title: "Tuileries → Pont des Arts walk",
           category: "Walk",
           location: "Jardin des Tuileries",
+          lat: 48.8634,
+          lng: 2.3275,
           cost: "Free",
           icon: "footprints",
           image:
@@ -178,6 +194,8 @@ export const PARIS_TRIP = {
           title: "Montmartre & Sacré-Cœur",
           category: "Walk",
           location: "18e arrondissement",
+          lat: 48.8867,
+          lng: 2.3431,
           cost: "Free",
           icon: "mountain",
           image:
@@ -191,6 +209,8 @@ export const PARIS_TRIP = {
           title: "Lunch at Le Consulat",
           category: "Dining",
           location: "18 Rue Norvins",
+          lat: 48.8865,
+          lng: 2.3399,
           cost: "$70",
           icon: "utensils",
           image:
@@ -204,6 +224,8 @@ export const PARIS_TRIP = {
           title: "Dinner at La Tour d'Argent (rooftop)",
           category: "Dining",
           location: "15 Quai de la Tournelle",
+          lat: 48.8499,
+          lng: 2.354,
           cost: "$280",
           icon: "wine",
           image:
@@ -225,6 +247,8 @@ export const PARIS_TRIP = {
           title: "RER C → Versailles Château",
           category: "Transit",
           location: "Gare d'Austerlitz",
+          lat: 48.8413,
+          lng: 2.3653,
           cost: "$8 (Navigo)",
           icon: "train",
           notes: "Sit on the right side for views over the Seine.",
@@ -236,6 +260,8 @@ export const PARIS_TRIP = {
           title: "Versailles Palace + Gardens",
           category: "Culture",
           location: "Place d'Armes, Versailles",
+          lat: 48.8049,
+          lng: 2.1204,
           cost: "$32 pp",
           icon: "landmark",
           image:
@@ -249,6 +275,8 @@ export const PARIS_TRIP = {
           title: "Petit Trianon picnic",
           category: "Walk",
           location: "Marie Antoinette's Estate",
+          lat: 48.8158,
+          lng: 2.1075,
           cost: "$25 (groceries)",
           icon: "salad",
           notes: "Pick up bread + cheese at the village before entering.",
@@ -268,6 +296,8 @@ export const PARIS_TRIP = {
           title: "Breakfast at Café de Flore",
           category: "Dining",
           location: "172 Bd Saint-Germain",
+          lat: 48.854,
+          lng: 2.3331,
           cost: "$45",
           icon: "coffee",
           image:
@@ -281,6 +311,8 @@ export const PARIS_TRIP = {
           title: "Sainte-Chapelle stained glass",
           category: "Culture",
           location: "8 Bd du Palais",
+          lat: 48.8554,
+          lng: 2.345,
           cost: "$13 pp",
           icon: "landmark",
           notes: "Go on a sunny morning — the 1,113 glass panels light up.",
@@ -292,6 +324,8 @@ export const PARIS_TRIP = {
           title: "Taxi to CDG airport",
           category: "Transit",
           location: "Charles de Gaulle (CDG)",
+          lat: 49.0097,
+          lng: 2.5479,
           cost: "$65",
           icon: "plane",
           notes: "Book Bolt or G7 — flat-rate €60 from central Paris.",

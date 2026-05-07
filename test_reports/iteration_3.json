@@ -1,0 +1,36 @@
+{
+  "summary": "Phase 2.1 Bearer-token auth migration regression. All 13 prior pytest cases still pass + added 2 new tests covering Authorization: Bearer header on /api/trips/generate and /api/trips. Code-reviewed /api/auth/session — already returns session_token in body (line 218). Frontend sanity verified for /, /trips, /chat, /auth/login + Google redirect target on https://journey-screens.preview.emergentagent.com.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_memento_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py /auth/session correctly returns {user, trips_claimed, session_token} (line 218) — Phase 2.1 contract intact. Cookie is also still set (line 198) so cookie+header dual support is preserved.",
+    "server.py get_current_user() reads token from cookie OR Authorization: Bearer header — works as designed; tested via test_auth_me_with_seeded_session, test_trips_list_authed_bearer, test_generate_trip_authed_bearer.",
+    "frontend api.js: axios interceptor injects Authorization: Bearer <token> from localStorage on every request — clean implementation. AuthCallback (auth.jsx line 96) stores resp.data.session_token correctly.",
+    "auth.jsx refresh() short-circuits when no token exists (avoids spurious 401 on every page load for unauthed users) — good.",
+    "Minor: session_token TTL on backend (7 days) is enforced via expires_at check, but frontend has no client-side expiry awareness — it relies on backend 401s to detect expiry; acceptable.",
+    "Server still uses deprecated @app.on_event('shutdown') (FastAPI lifespan recommended) — non-blocking.",
+    "trips/generate response trip['cover'] is now None (good fix from prior iteration's deprecated source.unsplash.com)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_memento_api.py"
+  ],
+  "success_rate": {"backend": "100% (15/15 pytest)", "frontend": "100% (all sanity checks passed)"},
+  "test_credentials": "Auth tested via mongosh-seeded user_sessions row + Authorization: Bearer header (per /app/auth_testing.md). No real Google account used.",
+  "seed_data_creation": "session-scoped fixture seed_session inserts a transient user + session_token into MongoDB (test_database.users + test_database.user_sessions) and cleans up on teardown. Generated trips for both guest and authed flows are also cleaned up.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase 2.1 Bearer-token migration is complete and verified end-to-end. Run: `pytest /app/backend/tests/test_memento_api.py -v` (15 tests, ~60s, includes 2 real Gemini 3 Pro LLM calls). Frontend: clicking 'Continue with Google' on /auth/login correctly navigates to https://auth.emergentagent.com/?redirect=...%2Ftrips. The /api/auth/session endpoint cannot be live-tested with bogus/injected session_id because it always calls Emergent's oauth/session-data endpoint — but the response shape (session_token in body) is verified via code inspection (server.py line 218). The frontend AuthCallback correctly reads resp.data.session_token and persists it to localStorage via setToken().",
+  "rca of the issue": "No bugs to RCA. All Phase 2.1 regression checks green."
+}

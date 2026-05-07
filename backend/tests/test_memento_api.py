@@ -179,6 +179,65 @@ def test_get_trip_non_existent(api):
     assert r.status_code == 404
 
 
+# ---------- Phase 2.1: Bearer-token (Authorization header) flows ----------
+
+def test_trips_list_authed_bearer(api, seeded_session):
+    """GET /api/trips with Authorization: Bearer <token> returns user's trips list (initially empty)."""
+    r = api.get(
+        f"{BASE_URL}/api/trips",
+        headers={"Authorization": f"Bearer {seeded_session['token']}"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "trips" in body
+    assert isinstance(body["trips"], list)
+
+
+def test_generate_trip_authed_bearer(api, seeded_session):
+    """POST /api/trips/generate with Bearer header — trip is associated with that user_id.
+
+    Then GET /api/trips with the same Bearer token must include the new trip.
+    """
+    payload = {
+        "intake": {
+            "destination": "Lisbon, Portugal",
+            "dates": "Apr 12-16, 2026",
+            "group": "2 adults",
+            "travelerType": ["Food Lover"],
+            "tripType": "City Break",
+            "budget": "$2,500",
+        }
+    }
+    r = api.post(
+        f"{BASE_URL}/api/trips/generate",
+        json=payload,
+        headers={"Authorization": f"Bearer {seeded_session['token']}"},
+        timeout=LLM_TIMEOUT,
+    )
+    if r.status_code == 503:
+        pytest.skip(f"LLM unavailable: {r.text[:200]}")
+    assert r.status_code == 200, r.text[:500]
+    trip_id = r.json()["trip_id"]
+    assert trip_id
+
+    # List trips for this authed user — should include new trip
+    rl = api.get(
+        f"{BASE_URL}/api/trips",
+        headers={"Authorization": f"Bearer {seeded_session['token']}"},
+    )
+    assert rl.status_code == 200
+    ids = [t["id"] for t in rl.json()["trips"]]
+    assert trip_id in ids, f"Generated trip {trip_id} not found in authed user's trip list"
+
+    # GET single trip with Bearer
+    rg = api.get(
+        f"{BASE_URL}/api/trips/{trip_id}",
+        headers={"Authorization": f"Bearer {seeded_session['token']}"},
+    )
+    assert rg.status_code == 200
+    assert rg.json().get("id") == trip_id
+
+
 def test_delete_trip(api, generated_trip):
     if generated_trip.status_code != 200:
         pytest.skip("trip not generated")
