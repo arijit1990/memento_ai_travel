@@ -1,0 +1,164 @@
+{
+  "theme": "LIGHT",
+  "archetype": "1_ORGANIC_EARTHY",
+  "typography": {
+    "fonts": [
+      {
+        "family": "Playfair Display",
+        "type": "heading",
+        "fallback": "serif",
+        "weight": "400, 600, 700",
+        "import_url": "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap"
+      },
+      {
+        "family": "Outfit",
+        "type": "body",
+        "fallback": "sans-serif",
+        "weight": "300, 400, 500, 600",
+        "import_url": "https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap"
+      }
+    ],
+    "scale": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tight leading-none font-serif",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight leading-tight font-serif",
+      "h3": "text-xl sm:text-2xl tracking-tight leading-snug font-serif",
+      "body": "text-base leading-relaxed font-sans",
+      "label": "text-xs tracking-[0.2em] uppercase font-bold font-sans"
+    }
+  },
+  "colors": {
+    "background": {
+      "primary": "#FAF8F5",
+      "secondary": "#F0EBE1",
+      "card": "#FFFFFF",
+      "overlay": "rgba(45, 40, 35, 0.4)"
+    },
+    "text": {
+      "primary": "#2D2823",
+      "secondary": "#5C5449",
+      "inverse": "#FFFFFF",
+      "accent": "#C85A40"
+    },
+    "brand": {
+      "primary": "#C85A40",
+      "primary_hover": "#A84A33",
+      "accent": "#E6B87D"
+    },
+    "smart_hack": {
+      "background": "#E8F0EA",
+      "text": "#2A4533"
+    },
+    "border": {
+      "subtle": "#E5DFD3",
+      "focus": "#C85A40"
+    }
+  },
+  "spacing_and_layout": {
+    "padding_scale": "p-4, p-6, p-8, p-12, p-16, p-24",
+    "corner_radius": {
+      "card": "rounded-2xl",
+      "button": "rounded-full",
+      "chip": "rounded-full",
+      "image": "rounded-xl",
+      "panel": "rounded-3xl"
+    },
+    "shadows": {
+      "ambient": "shadow-[0_8px_30px_rgb(0,0,0,0.04)]",
+      "elevated": "shadow-[0_20px_40px_rgb(0,0,0,0.08)]",
+      "button_hover": "shadow-[0_8px_15px_rgba(200,90,64,0.25)]"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#C85A40] text-white rounded-full px-8 py-3.5 hover:bg-[#A84A33] transition-colors shadow-sm font-medium",
+      "secondary": "bg-white text-[#2D2823] border border-[#E5DFD3] rounded-full px-8 py-3.5 hover:bg-[#F0EBE1] transition-colors font-medium"
+    },
+    "cards": {
+      "base": "bg-white rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-[#F0EBE1]",
+      "activity": "flex flex-col sm:flex-row gap-5 bg-white rounded-2xl p-5 border border-[#F0EBE1] hover:border-[#C85A40]/30 transition-all shadow-sm group cursor-pointer",
+      "day_card": "mb-8 bg-transparent sm:bg-white sm:rounded-3xl sm:p-8 sm:shadow-sm sm:border border-[#E5DFD3]",
+      "trip_card": "relative overflow-hidden rounded-2xl group cursor-pointer bg-white border border-[#E5DFD3]"
+    },
+    "chat_bubbles": {
+      "ai": "bg-white border border-[#E5DFD3] rounded-2xl rounded-tl-sm p-5 text-[#2D2823] shadow-sm font-sans",
+      "user": "bg-[#F0EBE1] rounded-2xl rounded-tr-sm p-5 text-[#2D2823] font-sans"
+    },
+    "smart_hack_chip": "inline-flex items-center gap-1.5 bg-[#E8F0EA] text-[#2A4533] px-3 py-1 rounded-full text-xs font-semibold hover:bg-[#D4E0D7] transition-colors cursor-pointer border border-[#C6D8CB]",
+    "map_marker": "bg-[#2D2823] text-white w-8 h-8 rounded-full flex items-center justify-center shadow-md border-2 border-white font-bold text-sm",
+    "navigation_rail": "fixed left-0 top-0 h-screen w-20 flex flex-col items-center py-8 bg-white border-r border-[#E5DFD3] gap-8 z-50 transition-all",
+    "split_panel": {
+      "container": "flex h-screen w-full bg-[#FAF8F5] overflow-hidden pl-0 lg:pl-20",
+      "chat_panel": "w-full md:w-[45%] h-full flex flex-col border-r border-[#E5DFD3] bg-white relative",
+      "itinerary_panel": "hidden md:flex w-[55%] h-full bg-[#FAF8F5] flex-col overflow-y-auto relative"
+    }
+  },
+  "motion": {
+    "transitions": {
+      "default": "transition-all duration-300 ease-in-out",
+      "fast": "transition-all duration-150 ease-out",
+      "slow": "transition-all duration-500 ease-in-out"
+    },
+    "hover_effects": {
+      "card_lift": "hover:-translate-y-1 hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)]",
+      "image_zoom": "overflow-hidden group-hover:scale-105 transition-transform duration-700 ease-out"
+    }
+  },
+  "media": {
+    "images": {
+      "hero_landing": {
+        "url": "https://images.unsplash.com/photo-1507721248975-cb8b1ec5b74f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwyfHx0cmF2ZWwlMjBlbW90aW9uYWwlMjB2aW50YWdlJTIwcGhvdG9ncmFwaHklMjBsYW5kc2NhcGV8ZW58MHx8fHwxNzc4MTg5MDA2fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Emotional vintage travel landscape for landing hero",
+        "category": "hero"
+      },
+      "paris_itinerary": [
+        {
+          "url": "https://images.unsplash.com/photo-1746031591882-fe9789b5bff6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDV8MHwxfHNlYXJjaHwyfHxwYXJpcyUyMGNhZmUlMjBzdHJlZXR8ZW58MHx8fHwxNzc4MTg5MDMwfDA&ixlib=rb-4.1.0&q=85",
+          "description": "Paris cafe street dusk",
+          "category": "itinerary_cover"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1695306812834-7f7ccc0e1140?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDV8MHwxfHNlYXJjaHwxfHxwYXJpcyUyMGNhZmUlMjBzdHJlZXR8ZW58MHx8fHwxNzc4MTg5MDMwfDA&ixlib=rb-4.1.0&q=85",
+          "description": "Paris cafe tables",
+          "category": "activity"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1649769907398-81cd07ab3298?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDV8MHwxfHNlYXJjaHw0fHxwYXJpcyUyMGNhZmUlMjBzdHJlZXR8ZW58MHx8fHwxNzc4MTg5MDMwfDA&ixlib=rb-4.1.0&q=85",
+          "description": "Paris restaurant group",
+          "category": "activity"
+        }
+      ],
+      "explore_destinations": [
+        {
+          "title": "Tokyo",
+          "url": "https://images.unsplash.com/photo-1571497245719-ce3e7f16db1f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNTl8MHwxfHNlYXJjaHw0fHx0b2t5byUyMHN0cmVldHxlbnwwfHx8fDE3NzgxODkwMzB8MA&ixlib=rb-4.1.0&q=85",
+          "category": "explore_card"
+        },
+        {
+          "title": "Santorini",
+          "url": "https://images.unsplash.com/photo-1613395877344-13d4a8e0d49e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwxfHxzYW50b3JpbmklMjBncmVlY2V8ZW58MHx8fHwxNzc4MTg5MDMwfDA&ixlib=rb-4.1.0&q=85",
+          "category": "explore_card"
+        },
+        {
+          "title": "Bali",
+          "url": "https://images.unsplash.com/photo-1717459254820-64fd9be3fb19?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzR8MHwxfHNlYXJjaHwyfHxiYWxpJTIwbGFuZHNjYXBlfGVufDB8fHx8MTc3ODE4OTAzMHww&ixlib=rb-4.1.0&q=85",
+          "category": "explore_card"
+        },
+        {
+          "title": "Vintage Travel",
+          "url": "https://images.unsplash.com/photo-1516013653438-125d615f1b9c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwzfHx0cmF2ZWwlMjBlbW90aW9uYWwlMjB2aW50YWdlJTIwcGhvdG9ncmFwaHklMjBsYW5kc2NhcGV8ZW58MHx8fHwxNzc4MTg5MDA2fDA&ixlib=rb-4.1.0&q=85",
+          "category": "explore_card"
+        }
+      ]
+    }
+  },
+  "instructions_to_main_agent": {
+    "overall": "Implement Memento frontend. Use Archetype 1: Organic & Earthy (Light). Emphasize editorial feel with Playfair Display for headings and Outfit for body. Use large margins and padding. Do not use generic Inter font or purple/teal gradients. Add fonts to index.html or global CSS.",
+    "layout_split_panel": "For the '/chat' route: Desktop must use a split-panel layout: 40-45% width for chat, 55-60% for itinerary right panel. On mobile, itinerary should be a toggleable sliding pane or stack. Include a 'Pre-generation Confirmation card' inside the chat and 'Progress indicator' logic mock.",
+    "intake_flow": "Implement dual-mode intake. A wizard form (Destination, Dates, Group, Traveler-type, Trip-type, Budget) AND a Chat interface. User can toggle between them.",
+    "itinerary_view": "Include a Day-by-Day timeline using 'day_card' wrapper and 'activity' cards. Each activity card needs fields for Name, Time, Duration, Cost, Map Pin, and Booking Deep-Link.",
+    "smart_hacks": "Implement Smart Hacks strip inside the itinerary view. Use 'smart_hack_chip' styling. Make them clickable.",
+    "navigation": "Use a persistent left-rail nav on Desktop, shrinking to icons on tablet, and a bottom bar on Mobile. Ensure Lucide React icons are used.",
+    "mock_data": "Hardcode Paris trip details to populate the itinerary. Use provided images. Ensure no empty states break the layout.",
+    "testing_attributes": "Add 'data-testid' to ALL interactive elements (buttons, inputs, links). Use kebab-case."
+  }
+}
