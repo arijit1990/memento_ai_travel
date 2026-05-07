@@ -69,6 +69,20 @@ class ClaimGuestRequest(BaseModel):
     guest_session_id: str
 
 
+class EditTripRequest(BaseModel):
+    message: str
+
+
+class SaveItemRequest(BaseModel):
+    title: str
+    type: str
+    location: Optional[str] = ""
+    image: Optional[str] = ""
+    activity_id: Optional[str] = None
+    trip_id: Optional[str] = None
+    guest_session_id: Optional[str] = None
+
+
 # ---------------------------- Auth helpers ----------------------------
 
 async def get_current_user(
@@ -490,6 +504,230 @@ async def delete_trip(
             raise HTTPException(status_code=403, detail="Not your trip")
     await db.trips.delete_one({"trip_id": trip_id})
     return {"ok": True}
+
+
+# ---------------------------- Trip edit (conversational) ----------------------------
+
+EDIT_SYSTEM_PROMPT = """You are Memento, editing an existing travel itinerary.
+
+You will receive the current itinerary JSON and the user's edit request in plain English.
+Apply the change with the lightest touch — preserve everything the user didn't ask to change.
+
+Rules:
+- Output ONLY valid JSON matching the same schema as the input itinerary
+- No markdown fences, no commentary, no preamble
+- Preserve activity IDs (a-X-Y) when possible; mint new ones for added activities
+- Keep lat/lng accurate for any new venues
+- If user asks to remove a day, renumber remaining days and dates accordingly
+- Keep tone consistent with the existing itinerary's voice"""
+
+
+async def call_edit_llm(provider: str, model: str, trip: Dict[str, Any], message: str) -> str:
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"trip-edit-{uuid.uuid4().hex[:8]}",
+        system_message=EDIT_SYSTEM_PROMPT,
+    ).with_model(provider, model)
+    user_msg = UserMessage(
+        text=(
+            f"Current itinerary JSON:\n{json.dumps(trip)[:14000]}\n\n"
+            f"User's edit request: \"{message}\"\n\n"
+            f"Return the full updated JSON only."
+        )
+    )
+    return await chat.send_message(user_msg)
+
+
+@api_router.post("/trips/{trip_id}/edit")
+async def edit_trip(
+    trip_id: str,
+    body: EditTripRequest,
+    request: Request,
+    guest_session_id: Optional[str] = None,
+    session_token: Optional[str] = Cookie(default=None),
+):
+    row = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    if not row:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    user = await get_current_user(request, session_token)
+    if row.get("user_id"):
+        if not user or user["user_id"] != row["user_id"]:
+            raise HTTPException(status_code=403, detail="Not your trip")
+    else:
+        if row.get("guest_session_id") != guest_session_id:
+            raise HTTPException(status_code=403, detail="Not your trip")
+
+    raw = None
+    used_model = None
+    last_err = None
+    for provider, model in [
+        ("gemini", "gemini-3.1-pro-preview"),
+        ("anthropic", "claude-sonnet-4-5-20250929"),
+    ]:
+        try:
+            raw = await asyncio.wait_for(
+                call_edit_llm(provider, model, row["trip"], body.message),
+                timeout=90,
+            )
+            used_model = f"{provider}/{model}"
+            break
+        except Exception as e:
+            last_err = str(e)
+            logging.exception("Edit LLM failed (%s/%s)", provider, model)
+
+    if raw is None:
+        raise HTTPException(status_code=503, detail=f"LLM unavailable: {last_err}")
+
+    try:
+        new_trip = extract_json(raw)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM returned malformed JSON: {e}")
+
+    new_trip["id"] = trip_id
+    new_trip["cover"] = row["trip"].get("cover")
+
+    await db.trips.update_one(
+        {"trip_id": trip_id},
+        {"$set": {"trip": new_trip, "updated_at": datetime.now(timezone.utc).isoformat(), "last_model": used_model}},
+    )
+    return {"trip": new_trip, "model": used_model}
+
+
+# ---------------------------- Share links ----------------------------
+
+@api_router.post("/trips/{trip_id}/share")
+async def create_share(
+    trip_id: str,
+    request: Request,
+    guest_session_id: Optional[str] = None,
+    session_token: Optional[str] = Cookie(default=None),
+):
+    row = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    if not row:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    user = await get_current_user(request, session_token)
+    if row.get("user_id"):
+        if not user or user["user_id"] != row["user_id"]:
+            raise HTTPException(status_code=403, detail="Not your trip")
+    else:
+        if row.get("guest_session_id") != guest_session_id:
+            raise HTTPException(status_code=403, detail="Not your trip")
+
+    token = uuid.uuid4().hex[:18]
+    await db.shares.insert_one({
+        "token": token,
+        "trip_id": trip_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"token": token}
+
+
+@api_router.get("/share/{token}")
+async def read_share(token: str):
+    s = await db.shares.find_one({"token": token}, {"_id": 0})
+    if not s:
+        raise HTTPException(status_code=404, detail="Share not found")
+    row = await db.trips.find_one({"trip_id": s["trip_id"]}, {"_id": 0})
+    if not row:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    return {"trip": row["trip"], "shared_at": s.get("created_at")}
+
+
+# ---------------------------- Saved items ----------------------------
+
+@api_router.get("/saved")
+async def list_saved(
+    request: Request,
+    guest_session_id: Optional[str] = None,
+    session_token: Optional[str] = Cookie(default=None),
+):
+    user = await get_current_user(request, session_token)
+    if user:
+        q = {"user_id": user["user_id"]}
+    elif guest_session_id:
+        q = {"guest_session_id": guest_session_id, "user_id": None}
+    else:
+        return {"items": []}
+    items = await db.saved_items.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return {"items": items}
+
+
+@api_router.post("/saved")
+async def create_saved(
+    body: SaveItemRequest,
+    request: Request,
+    session_token: Optional[str] = Cookie(default=None),
+):
+    user = await get_current_user(request, session_token)
+    user_id = user["user_id"] if user else None
+    guest_id = body.guest_session_id if not user_id else None
+    if not user_id and not guest_id:
+        raise HTTPException(status_code=400, detail="user or guest_session_id required")
+
+    item_id = f"saved-{uuid.uuid4().hex[:10]}"
+    doc = {
+        "id": item_id,
+        "user_id": user_id,
+        "guest_session_id": guest_id,
+        "title": body.title,
+        "type": body.type,
+        "location": body.location or "",
+        "image": body.image or "",
+        "activity_id": body.activity_id,
+        "trip_id": body.trip_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.saved_items.insert_one(doc)
+    return {"item": {k: v for k, v in doc.items() if k != "_id"}}
+
+
+@api_router.delete("/saved/{item_id}")
+async def delete_saved(
+    item_id: str,
+    request: Request,
+    guest_session_id: Optional[str] = None,
+    session_token: Optional[str] = Cookie(default=None),
+):
+    item = await db.saved_items.find_one({"id": item_id}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    user = await get_current_user(request, session_token)
+    if item.get("user_id"):
+        if not user or user["user_id"] != item["user_id"]:
+            raise HTTPException(status_code=403, detail="Not yours")
+    else:
+        if item.get("guest_session_id") != guest_session_id:
+            raise HTTPException(status_code=403, detail="Not yours")
+    await db.saved_items.delete_one({"id": item_id})
+    return {"ok": True}
+
+
+# ---------------------------- Booking prices (mock provider) ----------------------------
+
+# Deterministic pseudo-random pricing based on activity id — feels real, won't flicker
+def _mock_price(activity_id: str) -> Dict[str, Any]:
+    h = sum(ord(c) for c in activity_id)
+    base = 18 + (h * 7) % 240
+    return {
+        "price_usd": base,
+        "label": f"${base}",
+        "provider": ["Booking.com", "GetYourGuide", "Tiqets", "Tripadvisor"][h % 4],
+        "rating": round(3.8 + (h % 12) * 0.1, 1),
+        "reviews": 120 + (h * 3) % 4500,
+    }
+
+
+@api_router.get("/booking/prices")
+async def booking_prices(ids: str):
+    """Return live-looking prices for a comma-separated list of activity ids.
+    Adds a tiny artificial delay so the frontend skeleton feels real."""
+    await asyncio.sleep(0.4)
+    out = {}
+    for aid in [x.strip() for x in ids.split(",") if x.strip()]:
+        out[aid] = _mock_price(aid)
+    return {"prices": out}
 
 
 # ---------------------------- App wiring ----------------------------

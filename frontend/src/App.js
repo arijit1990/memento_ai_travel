@@ -13,6 +13,7 @@ import Saved from "@/pages/Saved";
 import Settings from "@/pages/Settings";
 import Login from "@/pages/auth/Login";
 import Signup from "@/pages/auth/Signup";
+import Share from "@/pages/Share";
 
 // Detect OAuth callback BEFORE rendering routes (synchronous, prevents race)
 const Router = () => {
@@ -22,6 +23,8 @@ const Router = () => {
   }
   return (
     <Routes>
+      {/* Public share lives outside AppShell — no nav rail */}
+      <Route path="/share/:token" element={<Share />} />
       <Route element={<AppShell />}>
         <Route path="/" element={<Landing />} />
         <Route path="/chat" element={<Chat />} />

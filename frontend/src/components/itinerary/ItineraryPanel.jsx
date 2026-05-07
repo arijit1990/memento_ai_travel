@@ -1,10 +1,48 @@
-import { Calendar, Users, Wallet, Share2, Download, Heart } from "lucide-react";
+import { useState } from "react";
+import { Calendar, Users, Wallet, Share2, Download, Heart, Check, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+
 import { DayCard } from "./DayCard";
 import { SmartHacksStrip } from "./SmartHacksStrip";
 import { RealMap } from "./RealMap";
+import { useLivePrices } from "./ActivityCard";
+import { api, getGuestSessionId } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
-export const ItineraryPanel = ({ trip, compact = false, onSave }) => {
+export const ItineraryPanel = ({ trip, compact = false, onSave, readOnly = false }) => {
+  const { prices, loading: pricesLoading } = useLivePrices(trip);
+  const { user } = useAuth();
+  const [shareCopied, setShareCopied] = useState(false);
+  const [creatingShare, setCreatingShare] = useState(false);
+
+  const handleShare = async () => {
+    if (creatingShare || !trip?.id) return;
+    setCreatingShare(true);
+    try {
+      const r = await api.post(
+        `/trips/${trip.id}/share`,
+        {},
+        { params: user ? {} : { guest_session_id: getGuestSessionId() } },
+      );
+      const url = `${window.location.origin}/share/${r.data.token}`;
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch (_e) {
+        /* clipboard may be blocked */
+      }
+      setShareCopied(true);
+      toast.success("Share link copied", { description: url });
+      setTimeout(() => setShareCopied(false), 2500);
+    } catch (e) {
+      toast.error("Couldn't create share link", {
+        description: e?.response?.data?.detail || "",
+      });
+    } finally {
+      setCreatingShare(false);
+    }
+  };
+
   return (
     <div
       className="flex-1 overflow-y-auto scrollbar-thin"
@@ -13,11 +51,7 @@ export const ItineraryPanel = ({ trip, compact = false, onSave }) => {
       {/* Cover */}
       <div className="relative h-56 sm:h-72 overflow-hidden">
         {trip.cover ? (
-          <img
-            src={trip.cover}
-            alt={trip.destination}
-            className="w-full h-full object-cover"
-          />
+          <img src={trip.cover} alt={trip.destination} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-memento-terracotta to-memento-espresso" />
         )}
@@ -34,30 +68,34 @@ export const ItineraryPanel = ({ trip, compact = false, onSave }) => {
           </p>
         </div>
 
-        <div className="absolute top-4 right-4 flex gap-2">
-          <button
-            onClick={onSave}
-            data-testid="itinerary-save-btn"
-            className="w-10 h-10 rounded-full bg-white/95 backdrop-blur-sm hover:bg-white text-memento-espresso flex items-center justify-center shadow-sm transition-colors"
-            aria-label="Save"
-          >
-            <Heart className="w-4 h-4" />
-          </button>
-          <button
-            data-testid="itinerary-share-btn"
-            className="w-10 h-10 rounded-full bg-white/95 backdrop-blur-sm hover:bg-white text-memento-espresso flex items-center justify-center shadow-sm transition-colors"
-            aria-label="Share"
-          >
-            <Share2 className="w-4 h-4" />
-          </button>
-          <button
-            data-testid="itinerary-download-btn"
-            className="w-10 h-10 rounded-full bg-white/95 backdrop-blur-sm hover:bg-white text-memento-espresso flex items-center justify-center shadow-sm transition-colors"
-            aria-label="Download"
-          >
-            <Download className="w-4 h-4" />
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="absolute top-4 right-4 flex gap-2">
+            <button
+              onClick={onSave}
+              data-testid="itinerary-save-btn"
+              className="w-10 h-10 rounded-full bg-white/95 backdrop-blur-sm hover:bg-white text-memento-espresso flex items-center justify-center shadow-sm transition-colors"
+              aria-label="Save"
+            >
+              <Heart className="w-4 h-4" />
+            </button>
+            <button
+              onClick={handleShare}
+              data-testid="itinerary-share-btn"
+              disabled={creatingShare}
+              className="w-10 h-10 rounded-full bg-white/95 backdrop-blur-sm hover:bg-white text-memento-espresso flex items-center justify-center shadow-sm transition-colors disabled:opacity-50"
+              aria-label="Share"
+            >
+              {shareCopied ? <Check className="w-4 h-4 text-memento-sage-dark" /> : <Share2 className="w-4 h-4" />}
+            </button>
+            <button
+              data-testid="itinerary-download-btn"
+              className="w-10 h-10 rounded-full bg-white/95 backdrop-blur-sm hover:bg-white text-memento-espresso flex items-center justify-center shadow-sm transition-colors"
+              aria-label="Download"
+            >
+              <Download className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       <div
@@ -145,16 +183,27 @@ export const ItineraryPanel = ({ trip, compact = false, onSave }) => {
             <h2 className="font-serif text-2xl sm:text-3xl text-memento-espresso tracking-tight">
               Day-by-day
             </h2>
-            <Button
-              variant="ghost"
-              data-testid="itinerary-edit-with-ai"
-              className="text-xs font-medium text-memento-terracotta hover:bg-memento-sand rounded-full"
-            >
-              Edit with AI →
-            </Button>
+            {!readOnly && (
+              <Button
+                variant="ghost"
+                data-testid="itinerary-edit-with-ai"
+                className="text-xs font-medium text-memento-terracotta hover:bg-memento-sand rounded-full"
+              >
+                Edit with AI →
+              </Button>
+            )}
           </div>
           {(trip.days || []).map((d, i) => (
-            <DayCard key={d.day} day={d} dayIndex={i} defaultOpen={i < 2} />
+            <DayCard
+              key={d.day}
+              day={d}
+              dayIndex={i}
+              defaultOpen={i < 2}
+              prices={prices}
+              pricesLoading={pricesLoading}
+              tripId={trip.id}
+              readOnly={readOnly}
+            />
           ))}
         </div>
 

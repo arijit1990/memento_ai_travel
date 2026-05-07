@@ -2,12 +2,11 @@ import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { ActivityCard } from "./ActivityCard";
 
-export const DayCard = ({ day, defaultOpen = true, dayIndex }) => {
+export const DayCard = ({ day, defaultOpen = true, dayIndex, prices, pricesLoading, tripId, readOnly }) => {
   const [open, setOpen] = useState(defaultOpen);
 
   return (
     <div className="mb-8" data-testid={`day-card-${day.day}`}>
-      {/* Day header */}
       <button
         onClick={() => setOpen(!open)}
         data-testid={`day-toggle-${day.day}`}
@@ -37,7 +36,6 @@ export const DayCard = ({ day, defaultOpen = true, dayIndex }) => {
         />
       </button>
 
-      {/* Activities */}
       {open && (
         <div className="space-y-3 pl-0 sm:pl-[76px]">
           {day.activities.map((a, i) => (
@@ -46,6 +44,10 @@ export const DayCard = ({ day, defaultOpen = true, dayIndex }) => {
               activity={a}
               dayIndex={dayIndex}
               activityIndex={i}
+              livePrice={prices?.[a.id]}
+              priceLoading={pricesLoading}
+              tripId={tripId}
+              readOnly={readOnly}
             />
           ))}
         </div>

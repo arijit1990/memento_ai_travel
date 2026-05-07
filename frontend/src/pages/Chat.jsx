@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plane, ArrowLeft } from "lucide-react";
+import { Plane, ArrowLeft, MessageCircle, Map } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -19,9 +19,10 @@ const Chat = () => {
   const [trip, setTrip] = useState(null);
   const [confirmSummary, setConfirmSummary] = useState([]);
   const [intake, setIntake] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [mobileView, setMobileView] = useState("chat"); // 'chat' | 'itinerary' (mobile only)
 
   useEffect(() => {
-    // Ensure guest session id exists
     if (!user) getGuestSessionId();
   }, [user]);
 
@@ -29,13 +30,19 @@ const Chat = () => {
     const userMsg = { id: `m-${Date.now()}`, role: "user", content: text };
     setMessages((m) => [...m, userMsg]);
 
+    // If we already have a trip, treat the message as an EDIT request
+    if (trip) {
+      handleEdit(text);
+      return;
+    }
+
+    // Otherwise, intake conversation flow
     setTimeout(() => {
       const lower = text.toLowerCase();
       let reply;
       let triggerConfirm = false;
       let detected = { ...(intake || { destination: "", dates: "Flexible", group: "2 adults", travelerType: [], tripType: "City Break", budget: "Flexible" }) };
 
-      // Naive entity sniffing for chat-flow demo
       const cityMatch = text.match(/\b(Paris|Tokyo|Lisbon|Bali|New York|Kyoto|Marrakech|Reykjavik|Santorini|London|Rome|Barcelona|Amsterdam|Berlin|Bangkok|Seoul|Mexico City|Buenos Aires|Cape Town|Istanbul|Dubai)\b/i);
       if (cityMatch) detected.destination = cityMatch[0];
 
@@ -43,8 +50,7 @@ const Chat = () => {
         reply = {
           id: `m-${Date.now() + 1}`,
           role: "ai",
-          content:
-            "Lovely thought — what city or region are you dreaming of? Tell me a place and a rough timeframe.",
+          content: "Lovely thought — what city or region are you dreaming of? Tell me a place and a rough timeframe.",
         };
       } else if (!lower.match(/\b(couple|solo|family|friends|2|two|3|three|4|four)\b/) && !detected.group?.match(/(adult|couple|family|friend)/i)) {
         reply = {
@@ -60,11 +66,9 @@ const Chat = () => {
         reply = {
           id: `m-${Date.now() + 1}`,
           role: "ai",
-          content:
-            "Got it. What kind of vibe are you after — culture-heavy, food-forward, adventurous, slow & restful? Pick anything that resonates.",
+          content: "Got it. What kind of vibe are you after — culture-heavy, food-forward, adventurous, slow & restful? Pick anything that resonates.",
         };
       } else {
-        // Detect traveler type
         const types = [];
         if (lower.match(/food|culinary|eat/)) types.push("Food Lover");
         if (lower.match(/culture|art|museum|history/)) types.push("Culture Seeker");
@@ -99,6 +103,49 @@ const Chat = () => {
         }, 600);
       }
     }, 700);
+  };
+
+  const handleEdit = async (message) => {
+    setEditing(true);
+    setMessages((m) => [
+      ...m,
+      {
+        id: `m-${Date.now()}`,
+        role: "ai",
+        content: "Working on it — rewriting your itinerary now...",
+      },
+    ]);
+    try {
+      const r = await api.post(
+        `/trips/${trip.id}/edit`,
+        { message },
+        { params: user ? {} : { guest_session_id: getGuestSessionId() } },
+      );
+      setTrip(r.data.trip);
+      setMessages((m) => [
+        ...m,
+        {
+          id: `m-${Date.now() + 1}`,
+          role: "ai",
+          content: "Done — your itinerary is updated. Take a look on the right.",
+        },
+      ]);
+      toast.success("Itinerary updated");
+      setMobileView("itinerary");
+    } catch (e) {
+      const msg = e?.response?.data?.detail || e?.message || "Edit failed";
+      toast.error("Couldn't apply that edit", { description: msg });
+      setMessages((m) => [
+        ...m,
+        {
+          id: `m-${Date.now() + 2}`,
+          role: "ai",
+          content: `I hit a snag — ${msg}. Want to try rephrasing?`,
+        },
+      ]);
+    } finally {
+      setEditing(false);
+    }
   };
 
   const handleWizardComplete = (data) => {
@@ -146,12 +193,13 @@ const Chat = () => {
       const r = await api.post("/trips/generate", payload);
       const generated = r.data.trip;
       setTrip(generated);
+      setMobileView("itinerary");
       setMessages((m) => [
         ...m,
         {
           id: `m-${Date.now() + 1}`,
           role: "ai",
-          content: `Done — your ${generated.destination} itinerary is on the right. I've layered in ${generated.smartHacks?.length || 0} smart hacks. Tell me what to tweak.`,
+          content: `Done — your ${generated.destination} itinerary is on the right. I've layered in ${generated.smartHacks?.length || 0} smart hacks. Tell me what to tweak — anything from "make day 3 less touristy" to "add a romantic dinner".`,
         },
       ]);
       toast.success("Itinerary ready", {
@@ -183,22 +231,33 @@ const Chat = () => {
     }
   };
 
+  const showItineraryMobile = mobileView === "itinerary" && trip;
+
   return (
     <div
       className="flex h-screen w-full bg-memento-cream overflow-hidden"
       data-testid="chat-page"
     >
       {/* Left: Chat / Wizard */}
-      <div className="w-full md:w-[45%] lg:w-[42%] xl:w-[40%] h-full flex flex-col border-r border-memento-parchment bg-white relative">
+      <div
+        className={`w-full md:w-[45%] lg:w-[42%] xl:w-[40%] h-full flex flex-col border-r border-memento-parchment bg-white relative ${
+          showItineraryMobile ? "hidden md:flex" : "flex"
+        }`}
+      >
         <div className="md:hidden border-b border-memento-parchment px-4 py-3 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2 text-memento-espresso text-sm">
             <ArrowLeft className="w-4 h-4" />
             <span className="font-serif">Memento</span>
           </Link>
           {trip && (
-            <Link to={`/itinerary/${trip.id}`} className="text-xs font-medium text-memento-terracotta">
-              View itinerary →
-            </Link>
+            <button
+              onClick={() => setMobileView("itinerary")}
+              data-testid="mobile-show-itinerary"
+              className="text-xs font-medium text-memento-terracotta flex items-center gap-1"
+            >
+              <Map className="w-3.5 h-3.5" />
+              View itinerary
+            </button>
           )}
         </div>
 
@@ -212,16 +271,44 @@ const Chat = () => {
             messages={messages}
             onSend={handleSend}
             onConfirm={handleConfirm}
-            generating={generating}
+            generating={generating || editing}
+            generatingLabel={editing ? "Rewriting your itinerary..." : "Handcrafting your itinerary..."}
             onSwitchToWizard={() => setMode("wizard")}
             showConfirmCard={showConfirm}
             confirmSummary={confirmSummary}
+            placeholder={
+              trip
+                ? "Make day 3 less touristy. Or add a romantic dinner..."
+                : "Ask Memento anything — 'Plan a Paris trip for 2'..."
+            }
           />
         )}
       </div>
 
-      {/* Right */}
-      <div className="hidden md:flex md:w-[55%] lg:w-[58%] xl:w-[60%] h-full bg-memento-cream flex-col" data-testid="itinerary-side-panel">
+      {/* Right: Itinerary preview */}
+      <div
+        className={`md:flex md:w-[55%] lg:w-[58%] xl:w-[60%] h-full bg-memento-cream flex-col ${
+          showItineraryMobile ? "flex w-full" : "hidden"
+        }`}
+        data-testid="itinerary-side-panel"
+      >
+        {/* Mobile back to chat bar */}
+        {showItineraryMobile && (
+          <div className="md:hidden border-b border-memento-parchment px-4 py-3 flex items-center justify-between bg-white">
+            <button
+              onClick={() => setMobileView("chat")}
+              data-testid="mobile-show-chat"
+              className="flex items-center gap-2 text-memento-espresso text-sm font-medium"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to chat
+            </button>
+            <span className="text-xs uppercase tracking-[0.15em] text-memento-coffee font-semibold flex items-center gap-1">
+              <MessageCircle className="w-3 h-3" />
+              Edit by message
+            </span>
+          </div>
+        )}
         {trip ? (
           <ItineraryPanel trip={trip} compact onSave={handleSaveTrip} />
         ) : (
@@ -245,8 +332,7 @@ const EmptyItineraryState = () => (
         Tell Memento where you're going.
       </h2>
       <p className="text-memento-coffee leading-relaxed mb-6">
-        Once we have a few details, your handcrafted day-by-day itinerary will
-        appear here — maps, smart hacks, and all.
+        Once we have a few details, your handcrafted day-by-day itinerary will appear here — maps, smart hacks, and all.
       </p>
       <div className="bg-white rounded-2xl p-5 border border-memento-parchment text-left">
         <p className="text-[10px] uppercase tracking-[0.2em] font-semibold text-memento-coffee mb-2">

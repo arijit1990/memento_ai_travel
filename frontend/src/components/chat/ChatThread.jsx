@@ -8,9 +8,11 @@ export const ChatThread = ({
   onSend,
   onConfirm,
   generating,
+  generatingLabel = "Handcrafting your itinerary...",
   onSwitchToWizard,
   showConfirmCard,
   confirmSummary,
+  placeholder = "Ask Memento anything — 'Make day 3 less touristy'...",
 }) => {
   const [input, setInput] = useState("");
   const scrollRef = useRef(null);
@@ -144,7 +146,7 @@ export const ChatThread = ({
                   <span className="w-2 h-2 rounded-full bg-memento-terracotta animate-pulse-dot" style={{ animationDelay: "400ms" }} />
                 </div>
                 <p className="text-sm font-medium text-memento-espresso">
-                  Handcrafting your Paris itinerary...
+                  {generatingLabel}
                 </p>
               </div>
               <div className="space-y-2 text-xs text-memento-coffee">
@@ -179,7 +181,7 @@ export const ChatThread = ({
                 handleSend();
               }
             }}
-            placeholder="Ask Memento anything — 'Make day 3 less touristy'..."
+            placeholder={placeholder}
             className="resize-none min-h-[56px] max-h-32 pr-14 pl-5 py-4 rounded-2xl border-memento-parchment bg-memento-cream/50 focus-visible:ring-memento-terracotta text-[15px]"
           />
           <Button

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   Bed,
   Utensils,
@@ -12,8 +13,12 @@ import {
   MapPin,
   ExternalLink,
   Bookmark,
+  Star,
 } from "lucide-react";
+import { toast } from "sonner";
 import { getBookingUrl, getBookingLabel } from "@/lib/booking";
+import { api, getGuestSessionId } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 const ICONS = {
   bed: Bed,
@@ -36,19 +41,51 @@ const CATEGORY_COLORS = {
   Transit: "bg-[#E5DFD3] text-memento-coffee",
 };
 
-export const ActivityCard = ({ activity, dayIndex, activityIndex }) => {
+export const ActivityCard = ({
+  activity,
+  dayIndex,
+  activityIndex,
+  livePrice,
+  priceLoading,
+  tripId,
+  readOnly = false,
+}) => {
   const Icon = ICONS[activity.icon] || MapPin;
   const colorClass =
     CATEGORY_COLORS[activity.category] || "bg-memento-sand text-memento-espresso";
   const bookingUrl = getBookingUrl(activity);
   const bookingLabel = getBookingLabel(activity);
+  const { user } = useAuth();
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (saved) return;
+    setSaved(true);
+    try {
+      await api.post("/saved", {
+        title: activity.title,
+        type: activity.category || "Activity",
+        location: activity.location,
+        image: activity.image || "",
+        activity_id: activity.id,
+        trip_id: tripId,
+        guest_session_id: user ? null : getGuestSessionId(),
+      });
+      toast.success("Saved", { description: activity.title });
+    } catch (_e) {
+      setSaved(false);
+      toast.error("Couldn't save");
+    }
+  };
 
   return (
     <div
       data-testid={`activity-card-${activity.id}`}
       className="group relative bg-white rounded-2xl border border-memento-parchment hover:border-memento-terracotta/40 hover:shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all overflow-hidden"
     >
-      <div className="flex flex-col sm:flex-row gap-0 sm:gap-0">
+      <div className="flex flex-col sm:flex-row">
         {/* Time column */}
         <div className="hidden sm:flex flex-col items-center justify-start pt-5 pb-5 px-5 w-24 shrink-0 border-r border-memento-parchment bg-memento-cream/40">
           <span className="font-serif text-2xl text-memento-espresso leading-none">
@@ -59,7 +96,7 @@ export const ActivityCard = ({ activity, dayIndex, activityIndex }) => {
           </span>
         </div>
 
-        {/* Image (only when provided) */}
+        {/* Image */}
         {activity.image && (
           <div className="relative w-full sm:w-40 h-40 sm:h-auto shrink-0 overflow-hidden bg-memento-sand">
             <img
@@ -87,13 +124,20 @@ export const ActivityCard = ({ activity, dayIndex, activityIndex }) => {
               <Icon className="w-3 h-3" />
               {activity.category}
             </span>
-            <button
-              data-testid={`activity-bookmark-${activity.id}`}
-              className="shrink-0 w-7 h-7 rounded-full hover:bg-memento-sand flex items-center justify-center text-memento-coffee hover:text-memento-terracotta transition-colors"
-              aria-label="Save"
-            >
-              <Bookmark className="w-4 h-4" />
-            </button>
+            {!readOnly && (
+              <button
+                onClick={handleSave}
+                data-testid={`activity-bookmark-${activity.id}`}
+                className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
+                  saved
+                    ? "bg-memento-terracotta text-white"
+                    : "hover:bg-memento-sand text-memento-coffee hover:text-memento-terracotta"
+                }`}
+                aria-label="Save"
+              >
+                <Bookmark className={`w-4 h-4 ${saved ? "fill-current" : ""}`} />
+              </button>
+            )}
           </div>
 
           <h4 className="font-serif text-xl text-memento-espresso tracking-tight leading-snug mb-1">
@@ -107,6 +151,35 @@ export const ActivityCard = ({ activity, dayIndex, activityIndex }) => {
             <p className="text-sm text-memento-coffee leading-relaxed mb-3 italic">
               "{activity.notes}"
             </p>
+          )}
+
+          {/* Live price strip */}
+          {!["Walk", "Transit"].includes(activity.category) && (
+            <div className="flex items-center gap-3 mb-3">
+              {priceLoading ? (
+                <span
+                  className="inline-block h-5 w-32 rounded-full animate-shimmer"
+                  data-testid={`activity-price-loading-${activity.id}`}
+                />
+              ) : livePrice ? (
+                <span
+                  data-testid={`activity-price-${activity.id}`}
+                  className="inline-flex items-center gap-1.5 text-xs text-memento-coffee"
+                >
+                  <span className="font-semibold text-memento-espresso">
+                    {livePrice.label}
+                  </span>
+                  <span>via {livePrice.provider}</span>
+                  <span className="flex items-center gap-0.5 text-memento-terracotta">
+                    <Star className="w-3 h-3 fill-current" />
+                    {livePrice.rating}
+                  </span>
+                  <span className="text-memento-coffee/70">
+                    ({livePrice.reviews.toLocaleString()})
+                  </span>
+                </span>
+              ) : null}
+            </div>
           )}
 
           <div className="flex items-center justify-between gap-3 mt-auto pt-3 border-t border-memento-parchment/60">
@@ -132,4 +205,41 @@ export const ActivityCard = ({ activity, dayIndex, activityIndex }) => {
       </div>
     </div>
   );
+};
+
+// Hook variant: fetches prices for all activities in a trip in one round-trip
+export const useLivePrices = (trip) => {
+  const [prices, setPrices] = useState({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!trip) return;
+    let cancelled = false;
+    setLoading(true);
+    const ids = (trip.days || [])
+      .flatMap((d) => d.activities || [])
+      .filter((a) => !["Walk", "Transit"].includes(a.category))
+      .map((a) => a.id)
+      .filter(Boolean);
+    if (ids.length === 0) {
+      setLoading(false);
+      return;
+    }
+    api
+      .get("/booking/prices", { params: { ids: ids.join(",") } })
+      .then((r) => {
+        if (!cancelled) {
+          setPrices(r.data?.prices || {});
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [trip]);
+
+  return { prices, loading };
 };

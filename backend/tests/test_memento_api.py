@@ -238,7 +238,147 @@ def test_generate_trip_authed_bearer(api, seeded_session):
     assert rg.json().get("id") == trip_id
 
 
-def test_delete_trip(api, generated_trip):
+# ---------- Phase 3: Share links ----------
+
+def test_share_create_and_read(api, generated_trip):
+    if generated_trip.status_code != 200:
+        pytest.skip("trip not generated")
+    trip_id = generated_trip.json()["trip_id"]
+    # Create share link with correct guest id
+    r = api.post(
+        f"{BASE_URL}/api/trips/{trip_id}/share",
+        params={"guest_session_id": GUEST_SESSION_ID},
+    )
+    assert r.status_code == 200, r.text[:300]
+    body = r.json()
+    assert "token" in body
+    token = body["token"]
+    assert isinstance(token, str) and len(token) > 8
+
+    # Public read - no auth
+    public = requests.Session()
+    rs = public.get(f"{BASE_URL}/api/share/{token}")
+    assert rs.status_code == 200
+    sb = rs.json()
+    assert "trip" in sb and "shared_at" in sb
+    assert sb["trip"].get("id") == trip_id
+
+
+def test_share_read_bogus_token(api):
+    r = api.get(f"{BASE_URL}/api/share/bogus-share-token-xyz-123")
+    assert r.status_code == 404
+    assert "Share not found" in r.text
+
+
+def test_share_create_wrong_guest_403(api, generated_trip):
+    if generated_trip.status_code != 200:
+        pytest.skip("trip not generated")
+    trip_id = generated_trip.json()["trip_id"]
+    r = api.post(
+        f"{BASE_URL}/api/trips/{trip_id}/share",
+        params={"guest_session_id": "wrong-guest-xyz"},
+    )
+    assert r.status_code == 403
+
+
+# ---------- Phase 3: Saved items ----------
+
+def test_saved_create_list_delete(api):
+    guest = f"guest_saved_{uuid.uuid4().hex[:8]}"
+    payload = {
+        "title": "Eiffel Tower",
+        "type": "activity",
+        "location": "Paris",
+        "image": "",
+        "activity_id": "a-1-1",
+        "trip_id": "trip-x",
+        "guest_session_id": guest,
+    }
+    r = api.post(f"{BASE_URL}/api/saved", json=payload)
+    assert r.status_code == 200, r.text[:300]
+    item = r.json().get("item")
+    assert item and "id" in item and item["title"] == "Eiffel Tower"
+    item_id = item["id"]
+
+    # List
+    rl = api.get(f"{BASE_URL}/api/saved", params={"guest_session_id": guest})
+    assert rl.status_code == 200
+    items = rl.json().get("items", [])
+    assert any(i["id"] == item_id for i in items)
+
+    # Delete
+    rd = api.delete(f"{BASE_URL}/api/saved/{item_id}", params={"guest_session_id": guest})
+    assert rd.status_code == 200
+    assert rd.json().get("ok") is True
+
+    # Verify gone
+    rl2 = api.get(f"{BASE_URL}/api/saved", params={"guest_session_id": guest})
+    assert rl2.status_code == 200
+    assert all(i["id"] != item_id for i in rl2.json().get("items", []))
+
+
+# ---------- Phase 3: Booking prices (mock, deterministic) ----------
+
+def test_booking_prices_deterministic(api):
+    r1 = api.get(f"{BASE_URL}/api/booking/prices", params={"ids": "a-1,a-2,a-3"})
+    assert r1.status_code == 200
+    p1 = r1.json().get("prices", {})
+    assert set(p1.keys()) == {"a-1", "a-2", "a-3"}
+    for k, v in p1.items():
+        assert "price_usd" in v and "label" in v and "provider" in v
+        assert "rating" in v and "reviews" in v
+
+    # Same ids should return same values
+    r2 = api.get(f"{BASE_URL}/api/booking/prices", params={"ids": "a-1,a-2,a-3"})
+    assert r2.status_code == 200
+    assert r2.json().get("prices") == p1
+
+
+# ---------- Phase 3: Conversational edit ----------
+
+def test_edit_trip_non_existent(api):
+    r = api.post(
+        f"{BASE_URL}/api/trips/non-existent-trip-id/edit",
+        json={"message": "make day 1 chill"},
+    )
+    assert r.status_code == 404
+
+
+def test_edit_trip_wrong_guest_403(api, generated_trip):
+    if generated_trip.status_code != 200:
+        pytest.skip("trip not generated")
+    trip_id = generated_trip.json()["trip_id"]
+    r = api.post(
+        f"{BASE_URL}/api/trips/{trip_id}/edit",
+        params={"guest_session_id": "wrong-guest-xyz"},
+        json={"message": "remove day 2"},
+    )
+    assert r.status_code == 403
+
+
+def test_edit_trip_llm(api, generated_trip):
+    """Real LLM call — long timeout. Skip if LLM unavailable."""
+    if generated_trip.status_code != 200:
+        pytest.skip("trip not generated")
+    trip_id = generated_trip.json()["trip_id"]
+    r = api.post(
+        f"{BASE_URL}/api/trips/{trip_id}/edit",
+        params={"guest_session_id": GUEST_SESSION_ID},
+        json={"message": "make day 1 less touristy and add a quiet evening"},
+        timeout=LLM_TIMEOUT,
+    )
+    if r.status_code == 503:
+        pytest.skip(f"LLM unavailable: {r.text[:200]}")
+    assert r.status_code == 200, r.text[:500]
+    body = r.json()
+    assert "trip" in body and "model" in body
+    assert body["trip"].get("id") == trip_id
+    # Schema preservation
+    assert "days" in body["trip"] and isinstance(body["trip"]["days"], list)
+
+
+# Keep delete LAST so it doesn't break preceding share/edit tests
+def test_zz_delete_trip(api, generated_trip):
     if generated_trip.status_code != 200:
         pytest.skip("trip not generated")
     trip_id = generated_trip.json()["trip_id"]
