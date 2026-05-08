@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Plane, ArrowLeft, MessageCircle, Map } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -9,6 +9,17 @@ import { ItineraryPanel } from "@/components/itinerary/ItineraryPanel";
 import { SAMPLE_CHAT } from "@/lib/mockData";
 import { api, getGuestSessionId } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { cleanDestination } from "@/lib/intake";
+import { streamGenerate } from "@/lib/stream";
+
+const THINKING_PHRASES = [
+  "Listening...",
+  "Got it...",
+  "Pulling this together...",
+  "One sec...",
+  "Mulling it over...",
+  "Tracking that down...",
+];
 
 const Chat = () => {
   const { user } = useAuth();
@@ -18,17 +29,31 @@ const Chat = () => {
   const [generating, setGenerating] = useState(false);
   const [trip, setTrip] = useState(null);
   const [confirmSummary, setConfirmSummary] = useState([]);
-  const [intake, setIntake] = useState(null);
+  const [intake, setIntake] = useState({});
   const [editing, setEditing] = useState(false);
+  const [thinking, setThinking] = useState(false);
+  const [thinkingLabel, setThinkingLabel] = useState(THINKING_PHRASES[0]);
+  const [progressMessage, setProgressMessage] = useState("Handcrafting your itinerary...");
   const [mobileView, setMobileView] = useState("chat"); // 'chat' | 'itinerary' (mobile only)
+  const thinkingIdx = useRef(0);
 
   useEffect(() => {
     if (!user) getGuestSessionId();
   }, [user]);
 
-  const handleSend = (text) => {
+  const buildSummary = (data) => [
+    { label: "Destination", value: data.destination || "—" },
+    { label: "When", value: data.dates || "Flexible" },
+    { label: "Group", value: data.group || "2 adults" },
+    { label: "Vibe", value: (data.travelerType || []).join(" · ") || "Explorer" },
+    { label: "Trip type", value: data.tripType || "City Break" },
+    { label: "Budget", value: data.budget || "Flexible" },
+  ];
+
+  const handleSend = async (text) => {
     const userMsg = { id: `m-${Date.now()}`, role: "user", content: text };
-    setMessages((m) => [...m, userMsg]);
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
 
     // If we already have a trip, treat the message as an EDIT request
     if (trip) {
@@ -36,73 +61,48 @@ const Chat = () => {
       return;
     }
 
-    // Otherwise, intake conversation flow
-    setTimeout(() => {
-      const lower = text.toLowerCase();
-      let reply;
-      let triggerConfirm = false;
-      let detected = { ...(intake || { destination: "", dates: "Flexible", group: "2 adults", travelerType: [], tripType: "City Break", budget: "Flexible" }) };
+    // LLM-driven intake extraction (gemini-2.5-flash, ~$0.0001/call)
+    // Cycle thinking copy to keep it warm/varied
+    thinkingIdx.current = (thinkingIdx.current + 1) % THINKING_PHRASES.length;
+    setThinkingLabel(THINKING_PHRASES[thinkingIdx.current]);
+    setThinking(true);
+    try {
+      const r = await api.post("/chat/intake", {
+        messages: newMessages.map(({ role, content }) => ({ role, content })),
+        current_intake: intake,
+      });
+      const { intake: newIntake, next_question, complete } = r.data;
+      setIntake(newIntake);
 
-      const cityMatch = text.match(/\b(Paris|Tokyo|Lisbon|Bali|New York|Kyoto|Marrakech|Reykjavik|Santorini|London|Rome|Barcelona|Amsterdam|Berlin|Bangkok|Seoul|Mexico City|Buenos Aires|Cape Town|Istanbul|Dubai)\b/i);
-      if (cityMatch) detected.destination = cityMatch[0];
-
-      if (!detected.destination) {
-        reply = {
-          id: `m-${Date.now() + 1}`,
-          role: "ai",
-          content: "Lovely thought — what city or region are you dreaming of? Tell me a place and a rough timeframe.",
-        };
-      } else if (!lower.match(/\b(couple|solo|family|friends|2|two|3|three|4|four)\b/) && !detected.group?.match(/(adult|couple|family|friend)/i)) {
-        reply = {
-          id: `m-${Date.now() + 1}`,
-          role: "ai",
-          content: `${detected.destination} — beautiful pick. Are you traveling solo, as a couple, or with a group? And roughly when?`,
-        };
-      } else if (!lower.match(/\b(food|culture|art|adventure|wellness|party|luxury|explore)\b/) && (!detected.travelerType || detected.travelerType.length === 0)) {
-        if (lower.match(/couple|2|two/)) detected.group = "2 adults";
-        else if (lower.match(/solo/)) detected.group = "Solo";
-        else if (lower.match(/family/)) detected.group = "Family with kids";
-        else if (lower.match(/friend/)) detected.group = "Friends (3-5)";
-        reply = {
-          id: `m-${Date.now() + 1}`,
-          role: "ai",
-          content: "Got it. What kind of vibe are you after — culture-heavy, food-forward, adventurous, slow & restful? Pick anything that resonates.",
-        };
-      } else {
-        const types = [];
-        if (lower.match(/food|culinary|eat/)) types.push("Food Lover");
-        if (lower.match(/culture|art|museum|history/)) types.push("Culture Seeker");
-        if (lower.match(/adventure|hike|outdoor/)) types.push("Adventure Seeker");
-        if (lower.match(/wellness|relax|spa|yoga/)) types.push("Wellness Traveller");
-        if (lower.match(/luxury|premium/)) types.push("Luxury Traveller");
-        if (lower.match(/party|nightlife/)) types.push("Party Animal");
-        if (types.length === 0) types.push("Explorer");
-        detected.travelerType = types;
-        triggerConfirm = true;
-        reply = {
-          id: `m-${Date.now() + 1}`,
-          role: "ai",
-          content: "Perfect — let me read this back to make sure I have it right.",
-        };
+      if (next_question) {
+        setMessages((m) => [
+          ...m,
+          {
+            id: `m-${Date.now() + 1}`,
+            role: "ai",
+            content: next_question,
+          },
+        ]);
       }
-
-      setIntake(detected);
-      setMessages((m) => [...m, reply]);
-
-      if (triggerConfirm) {
+      if (complete) {
         setTimeout(() => {
-          setConfirmSummary([
-            { label: "Destination", value: detected.destination },
-            { label: "When", value: detected.dates || "Flexible" },
-            { label: "Group", value: detected.group || "2 adults" },
-            { label: "Vibe", value: (detected.travelerType || []).join(" · ") || "Explorer" },
-            { label: "Trip type", value: detected.tripType || "City Break" },
-            { label: "Budget", value: detected.budget || "Flexible" },
-          ]);
+          setConfirmSummary(buildSummary(newIntake));
           setShowConfirm(true);
-        }, 600);
+        }, 400);
       }
-    }, 700);
+    } catch (e) {
+      const msg = e?.response?.data?.detail || "Network blip";
+      setMessages((m) => [
+        ...m,
+        {
+          id: `m-${Date.now() + 1}`,
+          role: "ai",
+          content: `Hmm, I missed that — could you say that again? (${msg})`,
+        },
+      ]);
+    } finally {
+      setThinking(false);
+    }
   };
 
   const handleEdit = async (message) => {
@@ -149,16 +149,11 @@ const Chat = () => {
   };
 
   const handleWizardComplete = (data) => {
+    // Apply destination cleanup so confirm card looks tidy even when user types verbosely
+    const cleaned = { ...data, destination: cleanDestination(data.destination) };
     setMode("chat");
-    setIntake(data);
-    setConfirmSummary([
-      { label: "Destination", value: data.destination },
-      { label: "When", value: data.dates },
-      { label: "Group", value: data.group },
-      { label: "Vibe", value: data.travelerType.join(" · ") },
-      { label: "Trip type", value: data.tripType },
-      { label: "Budget", value: data.budget },
-    ]);
+    setIntake(cleaned);
+    setConfirmSummary(buildSummary(cleaned));
     setMessages([
       ...SAMPLE_CHAT,
       {
@@ -173,25 +168,42 @@ const Chat = () => {
   const handleConfirm = async () => {
     setShowConfirm(false);
     setGenerating(true);
+    setProgressMessage("Handcrafting your itinerary...");
     setMessages((m) => [
       ...m,
       { id: `m-${Date.now()}`, role: "user", content: "Yes, generate it." },
     ]);
 
+    const payload = {
+      intake: {
+        destination: intake?.destination || "Paris, France",
+        dates: intake?.dates || "Flexible",
+        group: intake?.group || "2 adults",
+        travelerType:
+          (intake?.travelerType && intake.travelerType.length > 0)
+            ? intake.travelerType
+            : ["Explorer"],
+        tripType: intake?.tripType || "City Break",
+        budget: intake?.budget || "Flexible",
+      },
+      guest_session_id: user ? null : getGuestSessionId(),
+    };
+
     try {
-      const payload = {
-        intake: {
-          destination: intake?.destination || "Paris, France",
-          dates: intake?.dates || "Flexible",
-          group: intake?.group || "2 adults",
-          travelerType: intake?.travelerType || ["Explorer"],
-          tripType: intake?.tripType || "City Break",
-          budget: intake?.budget || "Flexible",
-        },
-        guest_session_id: user ? null : getGuestSessionId(),
-      };
-      const r = await api.post("/trips/generate", payload);
-      const generated = r.data.trip;
+      let generated = null;
+      let errorDetail = null;
+      for await (const evt of streamGenerate(payload)) {
+        if (evt.type === "status" && evt.message) {
+          setProgressMessage(evt.message);
+        } else if (evt.type === "done" && evt.trip) {
+          generated = evt.trip;
+        } else if (evt.type === "error") {
+          errorDetail = evt.detail || "Generation failed";
+        }
+      }
+      if (errorDetail) throw new Error(errorDetail);
+      if (!generated) throw new Error("No trip received");
+
       setTrip(generated);
       setMobileView("itinerary");
       setMessages((m) => [
@@ -206,7 +218,7 @@ const Chat = () => {
         description: `${generated.title} — ${generated.duration} handcrafted`,
       });
     } catch (e) {
-      const msg = e?.response?.data?.detail || e?.message || "Generation failed";
+      const msg = e?.message || "Generation failed";
       toast.error("Couldn't generate the trip", { description: msg });
       setMessages((m) => [
         ...m,
@@ -238,7 +250,6 @@ const Chat = () => {
       className="flex h-screen w-full bg-memento-cream overflow-hidden"
       data-testid="chat-page"
     >
-      {/* Left: Chat / Wizard */}
       <div
         className={`w-full md:w-[45%] lg:w-[42%] xl:w-[40%] h-full flex flex-col border-r border-memento-parchment bg-white relative ${
           showItineraryMobile ? "hidden md:flex" : "flex"
@@ -271,28 +282,33 @@ const Chat = () => {
             messages={messages}
             onSend={handleSend}
             onConfirm={handleConfirm}
-            generating={generating || editing}
-            generatingLabel={editing ? "Rewriting your itinerary..." : "Handcrafting your itinerary..."}
+            generating={generating || editing || thinking}
+            generatingLabel={
+              editing
+                ? "Rewriting your itinerary..."
+                : generating
+                ? progressMessage
+                : thinkingLabel
+            }
+            showProgressBullets={generating}
             onSwitchToWizard={() => setMode("wizard")}
             showConfirmCard={showConfirm}
             confirmSummary={confirmSummary}
             placeholder={
               trip
                 ? "Make day 3 less touristy. Or add a romantic dinner..."
-                : "Ask Memento anything — 'Plan a Paris trip for 2'..."
+                : "Tell me where you're going — 'Paris with my partner for a week, food and art'..."
             }
           />
         )}
       </div>
 
-      {/* Right: Itinerary preview */}
       <div
         className={`md:flex md:w-[55%] lg:w-[58%] xl:w-[60%] h-full bg-memento-cream flex-col ${
           showItineraryMobile ? "flex w-full" : "hidden"
         }`}
         data-testid="itinerary-side-panel"
       >
-        {/* Mobile back to chat bar */}
         {showItineraryMobile && (
           <div className="md:hidden border-b border-memento-parchment px-4 py-3 flex items-center justify-between bg-white">
             <button

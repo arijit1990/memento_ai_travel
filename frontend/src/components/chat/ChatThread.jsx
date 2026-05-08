@@ -9,6 +9,7 @@ export const ChatThread = ({
   onConfirm,
   generating,
   generatingLabel = "Handcrafting your itinerary...",
+  showProgressBullets = false,
   onSwitchToWizard,
   showConfirmCard,
   confirmSummary,
@@ -112,7 +113,12 @@ export const ChatThread = ({
                 ))}
               </div>
               <p className="text-xs text-memento-coffee mb-4 italic">
-                Want me to handcraft your Paris itinerary now?
+                {(() => {
+                  const dest = confirmSummary.find((r) => r.label === "Destination")?.value;
+                  return dest
+                    ? `Want me to handcraft your ${dest} itinerary now?`
+                    : "Want me to handcraft your itinerary now?";
+                })()}
               </p>
               <div className="flex gap-2">
                 <Button
@@ -139,7 +145,7 @@ export const ChatThread = ({
         {generating && (
           <div className="ml-11 animate-float-up" data-testid="generating-indicator">
             <div className="bg-white rounded-2xl border border-memento-parchment p-5 shadow-sm max-w-md">
-              <div className="flex items-center gap-3 mb-3">
+              <div className={`flex items-center gap-3 ${showProgressBullets ? "mb-3" : ""}`}>
                 <div className="flex gap-1">
                   <span className="w-2 h-2 rounded-full bg-memento-terracotta animate-pulse-dot" style={{ animationDelay: "0ms" }} />
                   <span className="w-2 h-2 rounded-full bg-memento-terracotta animate-pulse-dot" style={{ animationDelay: "200ms" }} />
@@ -149,20 +155,22 @@ export const ChatThread = ({
                   {generatingLabel}
                 </p>
               </div>
-              <div className="space-y-2 text-xs text-memento-coffee">
-                <p className="flex items-center gap-2">
-                  <span className="w-1 h-1 rounded-full bg-memento-sage-dark" />
-                  Found 14 hotels in Le Marais
-                </p>
-                <p className="flex items-center gap-2">
-                  <span className="w-1 h-1 rounded-full bg-memento-sage-dark" />
-                  Optimizing for art &amp; pastry
-                </p>
-                <p className="flex items-center gap-2">
-                  <span className="w-1 h-1 rounded-full bg-memento-sage-dark" />
-                  Routing transit, applying smart hacks...
-                </p>
-              </div>
+              {showProgressBullets && (
+                <div className="space-y-2 text-xs text-memento-coffee">
+                  <p className="flex items-center gap-2">
+                    <span className="w-1 h-1 rounded-full bg-memento-sage-dark" />
+                    Researching neighborhoods &amp; stays
+                  </p>
+                  <p className="flex items-center gap-2">
+                    <span className="w-1 h-1 rounded-full bg-memento-sage-dark" />
+                    Tuning for your vibe &amp; pace
+                  </p>
+                  <p className="flex items-center gap-2">
+                    <span className="w-1 h-1 rounded-full bg-memento-sage-dark" />
+                    Routing transit, layering smart hacks...
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}

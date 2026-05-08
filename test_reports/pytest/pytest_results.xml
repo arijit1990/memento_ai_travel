@@ -1,1 +1,128 @@
-<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="23" time="100.089" timestamp="2026-05-07T22:17:31.782750+00:00" hostname="agent-env-065e25b3-f4a2-4f68-93be-9dcbe056f19b"><testcase classname="backend.tests.test_memento_api" name="test_root" time="0.305" /><testcase classname="backend.tests.test_memento_api" name="test_auth_me_unauthenticated" time="0.075" /><testcase classname="backend.tests.test_memento_api" name="test_auth_session_bogus" time="0.205" /><testcase classname="backend.tests.test_memento_api" name="test_auth_logout_idempotent" time="0.071" /><testcase classname="backend.tests.test_memento_api" name="test_auth_me_with_seeded_session" time="0.546" /><testcase classname="backend.tests.test_memento_api" name="test_trips_list_guest_empty" time="0.077" /><testcase classname="backend.tests.test_memento_api" name="test_generate_trip_status" time="30.237" /><testcase classname="backend.tests.test_memento_api" name="test_generate_trip_schema" time="0.000" /><testcase classname="backend.tests.test_memento_api" name="test_trips_list_after_generate" time="0.082" /><testcase classname="backend.tests.test_memento_api" name="test_get_trip_by_id_success" time="0.077" /><testcase classname="backend.tests.test_memento_api" name="test_get_trip_wrong_guest_id" time="0.070" /><testcase classname="backend.tests.test_memento_api" name="test_get_trip_non_existent" time="0.070" /><testcase classname="backend.tests.test_memento_api" name="test_trips_list_authed_bearer" time="0.070" /><testcase classname="backend.tests.test_memento_api" name="test_generate_trip_authed_bearer" time="29.899" /><testcase classname="backend.tests.test_memento_api" name="test_share_create_and_read" time="0.255" /><testcase classname="backend.tests.test_memento_api" name="test_share_read_bogus_token" time="0.071" /><testcase classname="backend.tests.test_memento_api" name="test_share_create_wrong_guest_403" time="0.069" /><testcase classname="backend.tests.test_memento_api" name="test_saved_create_list_delete" time="0.276" /><testcase classname="backend.tests.test_memento_api" name="test_booking_prices_deterministic" time="0.945" /><testcase classname="backend.tests.test_memento_api" name="test_edit_trip_non_existent" time="0.073" /><testcase classname="backend.tests.test_memento_api" name="test_edit_trip_wrong_guest_403" time="0.068" /><testcase classname="backend.tests.test_memento_api" name="test_edit_trip_llm" time="35.766" /><testcase classname="backend.tests.test_memento_api" name="test_zz_delete_trip" time="0.588" /></testsuite></testsuites>
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="4" skipped="3" tests="39" time="289.151" timestamp="2026-05-08T15:11:44.349039+00:00" hostname="agent-env-065e25b3-f4a2-4f68-93be-9dcbe056f19b"><testcase classname="backend.tests.test_chat_intake" name="test_intake_dense_message_extracts_all_fields" time="2.195" /><testcase classname="backend.tests.test_chat_intake" name="test_intake_single_short_message_kerala" time="8.731" /><testcase classname="backend.tests.test_chat_intake" name="test_intake_multi_turn_carries_forward_destination" time="1.932" /><testcase classname="backend.tests.test_chat_intake" name="test_intake_empty_messages_handled" time="26.963" /><testcase classname="backend.tests.test_chat_intake" name="test_intake_gibberish_message_handled" time="1.547" /><testcase classname="backend.tests.test_chat_intake" name="test_intake_unicode_destination_tokyo" time="2.793" /><testcase classname="backend.tests.test_chat_intake" name="test_intake_unicode_destination_ile_de_re" time="2.944" /><testcase classname="backend.tests.test_memento_api" name="test_root" time="0.229" /><testcase classname="backend.tests.test_memento_api" name="test_auth_me_unauthenticated" time="0.067" /><testcase classname="backend.tests.test_memento_api" name="test_auth_session_bogus" time="0.196" /><testcase classname="backend.tests.test_memento_api" name="test_auth_logout_idempotent" time="0.061" /><testcase classname="backend.tests.test_memento_api" name="test_auth_me_with_seeded_session" time="0.473" /><testcase classname="backend.tests.test_memento_api" name="test_trips_list_guest_empty" time="0.059" /><testcase classname="backend.tests.test_memento_api" name="test_generate_trip_status" time="31.951" /><testcase classname="backend.tests.test_memento_api" name="test_generate_trip_schema" time="0.000" /><testcase classname="backend.tests.test_memento_api" name="test_trips_list_after_generate" time="0.013"><failure message="requests.exceptions.ConnectionError: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))">/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:787: in urlopen
+    response = self._make_request(
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:534: in _make_request
+    response = conn.getresponse()
+               ^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/urllib3/connection.py:571: in getresponse
+    httplib_response = super().getresponse()
+                       ^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:1415: in getresponse
+    response.begin()
+/usr/local/lib/python3.11/http/client.py:330: in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:299: in _read_status
+    raise RemoteDisconnected("Remote end closed connection without"
+E   http.client.RemoteDisconnected: Remote end closed connection without response
+
+During handling of the above exception, another exception occurred:
+/root/.venv/lib/python3.11/site-packages/requests/adapters.py:645: in send
+    resp = conn.urlopen(
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:841: in urlopen
+    retries = retries.increment(
+/root/.venv/lib/python3.11/site-packages/urllib3/util/retry.py:490: in increment
+    raise reraise(type(error), error, _stacktrace)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/urllib3/util/util.py:38: in reraise
+    raise value.with_traceback(tb)
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:787: in urlopen
+    response = self._make_request(
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:534: in _make_request
+    response = conn.getresponse()
+               ^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/urllib3/connection.py:571: in getresponse
+    httplib_response = super().getresponse()
+                       ^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:1415: in getresponse
+    response.begin()
+/usr/local/lib/python3.11/http/client.py:330: in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:299: in _read_status
+    raise RemoteDisconnected("Remote end closed connection without"
+E   urllib3.exceptions.ProtocolError: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+
+During handling of the above exception, another exception occurred:
+backend/tests/test_memento_api.py:153: in test_trips_list_after_generate
+    r = api.get(f"{BASE_URL}/api/trips", params={"guest_session_id": GUEST_SESSION_ID})
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:605: in get
+    return self.request("GET", url, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:592: in request
+    resp = self.send(prep, **send_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:706: in send
+    r = adapter.send(request, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/adapters.py:660: in send
+    raise ConnectionError(err, request=request)
+E   requests.exceptions.ConnectionError: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))</failure></testcase><testcase classname="backend.tests.test_memento_api" name="test_get_trip_by_id_success" time="0.214" /><testcase classname="backend.tests.test_memento_api" name="test_get_trip_wrong_guest_id" time="0.075" /><testcase classname="backend.tests.test_memento_api" name="test_get_trip_non_existent" time="0.077" /><testcase classname="backend.tests.test_memento_api" name="test_trips_list_authed_bearer" time="0.078" /><testcase classname="backend.tests.test_memento_api" name="test_generate_trip_authed_bearer" time="27.403" /><testcase classname="backend.tests.test_memento_api" name="test_share_create_and_read" time="0.227" /><testcase classname="backend.tests.test_memento_api" name="test_share_read_bogus_token" time="0.083" /><testcase classname="backend.tests.test_memento_api" name="test_share_create_wrong_guest_403" time="0.077" /><testcase classname="backend.tests.test_memento_api" name="test_saved_create_list_delete" time="0.325" /><testcase classname="backend.tests.test_memento_api" name="test_booking_prices_deterministic" time="0.955" /><testcase classname="backend.tests.test_memento_api" name="test_edit_trip_non_existent" time="0.071" /><testcase classname="backend.tests.test_memento_api" name="test_edit_trip_wrong_guest_403" time="0.072" /><testcase classname="backend.tests.test_memento_api" name="test_edit_trip_llm" time="38.448" /><testcase classname="backend.tests.test_memento_api" name="test_zz_delete_trip" time="0.176" /><testcase classname="backend.tests.test_phase5_streaming_export" name="test_stream_content_type_and_no_buffering" time="0.196" /><testcase classname="backend.tests.test_phase5_streaming_export" name="test_stream_status_then_done" time="60.248"><failure message="AssertionError: assert 'status' == 'done'&#10;  &#10;  - done&#10;  + status">backend/tests/test_phase5_streaming_export.py:99: in test_stream_status_then_done
+    assert last.get("type") == "done"
+E   AssertionError: assert 'status' == 'done'
+E     
+E     - done
+E     + status</failure></testcase><testcase classname="backend.tests.test_phase5_streaming_export" name="test_stream_destination_aware_message" time="0.000" /><testcase classname="backend.tests.test_phase5_streaming_export" name="test_stream_validates_input" time="10.112"><failure message="requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='journey-screens.preview.emergentagent.com', port=443): Read timed out. (read timeout=10)">/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:534: in _make_request
+    response = conn.getresponse()
+               ^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/urllib3/connection.py:571: in getresponse
+    httplib_response = super().getresponse()
+                       ^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:1415: in getresponse
+    response.begin()
+/usr/local/lib/python3.11/http/client.py:330: in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:291: in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/socket.py:718: in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/ssl.py:1314: in recv_into
+    return self.read(nbytes, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/ssl.py:1166: in read
+    return self._sslobj.read(len, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TimeoutError: The read operation timed out
+
+The above exception was the direct cause of the following exception:
+/root/.venv/lib/python3.11/site-packages/requests/adapters.py:645: in send
+    resp = conn.urlopen(
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:841: in urlopen
+    retries = retries.increment(
+/root/.venv/lib/python3.11/site-packages/urllib3/util/retry.py:490: in increment
+    raise reraise(type(error), error, _stacktrace)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/urllib3/util/util.py:39: in reraise
+    raise value
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:787: in urlopen
+    response = self._make_request(
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:536: in _make_request
+    self._raise_timeout(err=e, url=url, timeout_value=read_timeout)
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:367: in _raise_timeout
+    raise ReadTimeoutError(
+E   urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='journey-screens.preview.emergentagent.com', port=443): Read timed out. (read timeout=10)
+
+During handling of the above exception, another exception occurred:
+backend/tests/test_phase5_streaming_export.py:115: in test_stream_validates_input
+    r = requests.post(
+/root/.venv/lib/python3.11/site-packages/requests/api.py:115: in post
+    return request("post", url, data=data, json=json, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/api.py:59: in request
+    return session.request(method=method, url=url, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:592: in request
+    resp = self.send(prep, **send_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:706: in send
+    r = adapter.send(request, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/adapters.py:691: in send
+    raise ReadTimeout(e, request=request)
+E   requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='journey-screens.preview.emergentagent.com', port=443): Read timed out. (read timeout=10)</failure></testcase><testcase classname="backend.tests.test_phase5_streaming_export" name="test_non_stream_generate_still_works" time="60.182"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">backend/tests/test_phase5_streaming_export.py:144: in test_non_stream_generate_still_works
+    assert non_stream_trip.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_phase5_streaming_export" name="test_export_invalid_email" time="0.000"><skipped type="pytest.skip" message="no trip">/app/backend/tests/test_phase5_streaming_export.py:155: no trip</skipped></testcase><testcase classname="backend.tests.test_phase5_streaming_export" name="test_export_non_existent_trip" time="9.282" /><testcase classname="backend.tests.test_phase5_streaming_export" name="test_export_wrong_guest_id" time="0.000"><skipped type="pytest.skip" message="no trip">/app/backend/tests/test_phase5_streaming_export.py:175: no trip</skipped></testcase><testcase classname="backend.tests.test_phase5_streaming_export" name="test_export_success_creates_share_token" time="0.371"><skipped type="pytest.skip" message="no trip">/app/backend/tests/test_phase5_streaming_export.py:186: no trip</skipped></testcase></testsuite></testsuites>

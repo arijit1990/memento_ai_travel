@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Calendar, Users, Wallet, Share2, Download, Heart, Check, Copy } from "lucide-react";
+import { Calendar, Users, Wallet, Share2, Download, Heart, Check, Mail, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
@@ -7,6 +7,7 @@ import { DayCard } from "./DayCard";
 import { SmartHacksStrip } from "./SmartHacksStrip";
 import { RealMap } from "./RealMap";
 import { useLivePrices } from "./ActivityCard";
+import { ExportModal } from "./ExportModal";
 import { api, getGuestSessionId } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
@@ -15,6 +16,7 @@ export const ItineraryPanel = ({ trip, compact = false, onSave, readOnly = false
   const { user } = useAuth();
   const [shareCopied, setShareCopied] = useState(false);
   const [creatingShare, setCreatingShare] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const handleShare = async () => {
     if (creatingShare || !trip?.id) return;
@@ -86,6 +88,14 @@ export const ItineraryPanel = ({ trip, compact = false, onSave, readOnly = false
               aria-label="Share"
             >
               {shareCopied ? <Check className="w-4 h-4 text-memento-sage-dark" /> : <Share2 className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={() => setExportOpen(true)}
+              data-testid="itinerary-export-btn"
+              className="w-10 h-10 rounded-full bg-white/95 backdrop-blur-sm hover:bg-white text-memento-espresso flex items-center justify-center shadow-sm transition-colors"
+              aria-label="Email itinerary"
+            >
+              <Mail className="w-4 h-4" />
             </button>
             <button
               data-testid="itinerary-download-btn"
@@ -213,6 +223,40 @@ export const ItineraryPanel = ({ trip, compact = false, onSave, readOnly = false
           </p>
         </div>
       </div>
+
+      {/* Inline export section — at bottom for always-visible CTA */}
+      {!readOnly && (
+        <div className="px-6 sm:px-10 lg:px-14 pb-16">
+          <div className="max-w-5xl">
+            <div className="bg-memento-sand rounded-3xl p-6 sm:p-8 border border-memento-parchment flex flex-col sm:flex-row sm:items-center gap-5 sm:gap-8">
+              <div className="w-12 h-12 shrink-0 rounded-2xl bg-white text-memento-terracotta flex items-center justify-center">
+                <Send className="w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <p className="text-[10px] uppercase tracking-[0.2em] text-memento-terracotta font-bold mb-1">
+                  Take it with you
+                </p>
+                <h3 className="font-serif text-2xl text-memento-espresso tracking-tight leading-tight">
+                  Send this to your inbox
+                </h3>
+                <p className="text-sm text-memento-coffee mt-1">
+                  We'll email you the full itinerary plus a shareable link.
+                </p>
+              </div>
+              <Button
+                onClick={() => setExportOpen(true)}
+                data-testid="itinerary-export-inline"
+                className="shrink-0 bg-memento-espresso hover:bg-memento-coffee text-memento-cream rounded-full h-11 px-6 font-medium"
+              >
+                <Mail className="w-4 h-4 mr-2" />
+                Email me this trip
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ExportModal open={exportOpen} onClose={() => setExportOpen(false)} trip={trip} />
     </div>
   );
 };
