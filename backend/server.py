@@ -20,7 +20,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 # Fail fast with clear messages if required env vars are missing
-_REQUIRED_ENV = ["MONGO_URL", "DB_NAME", "GOOGLE_AI_KEY"]
+_REQUIRED_ENV = ["MONGO_URL", "DB_NAME", "GOOGLE_AI_KEY", "SUPABASE_JWT_SECRET"]
 for _key in _REQUIRED_ENV:
     if not os.environ.get(_key):
         raise RuntimeError(f"Required environment variable '{_key}' is not set. Check your .env file.")
@@ -34,8 +34,8 @@ GOOGLE_AI_KEY = os.environ.get("GOOGLE_AI_KEY")
 # Provider keys — only needed when the corresponding provider is active
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-# EMERGENT_AUTH_BASE is required — no hardcoded default so Vercel deployments are explicit
-EMERGENT_AUTH_BASE = os.environ.get("EMERGENT_AUTH_BASE")
+# Supabase JWT secret — used to verify access tokens locally (no outbound HTTP call)
+SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET")
 EXPORT_WEBHOOK_URL = os.environ.get("EXPORT_WEBHOOK_URL")
 FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
 
@@ -193,29 +193,35 @@ async def auth_session(
     response: Response,
     body: Dict[str, Any],
 ):
-    """Exchange Emergent session_id for a server-side session.
-    Optionally claim a guest_session_id's trips on first sign-in."""
-    session_id = body.get("session_id")
+    """Exchange a Supabase access_token for a server-side session cookie.
+    Verifies the JWT locally using SUPABASE_JWT_SECRET — no outbound HTTP call.
+    Optionally claims a guest_session_id's trips on first sign-in."""
+    from jose import jwt as jose_jwt, JWTError
+
+    access_token = body.get("access_token")
     guest_session_id = body.get("guest_session_id")
-    if not session_id:
-        raise HTTPException(status_code=400, detail="session_id required")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="access_token required")
 
-    # Call Emergent to fetch session data
-    async with httpx.AsyncClient(timeout=15) as h:
-        r = await h.get(
-            f"{EMERGENT_AUTH_BASE}/oauth/session-data",
-            headers={"X-Session-ID": session_id},
+    # Verify the Supabase JWT locally
+    try:
+        payload = jose_jwt.decode(
+            access_token,
+            SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            options={"verify_aud": False},
         )
-    if r.status_code != 200:
-        raise HTTPException(status_code=401, detail="Invalid session_id")
-    data = r.json()
+    except JWTError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
 
-    email = data.get("email")
-    name = data.get("name") or email
-    picture = data.get("picture")
-    session_token = data.get("session_token")
-    if not email or not session_token:
-        raise HTTPException(status_code=502, detail="Bad auth response")
+    email = payload.get("email")
+    user_metadata = payload.get("user_metadata", {})
+    name = user_metadata.get("full_name") or user_metadata.get("name") or email
+    picture = user_metadata.get("avatar_url") or user_metadata.get("picture")
+    session_token = uuid.uuid4().hex
+
+    if not email:
+        raise HTTPException(status_code=502, detail="Token missing email claim")
 
     # Upsert user
     existing = await db.users.find_one({"email": email}, {"_id": 0})

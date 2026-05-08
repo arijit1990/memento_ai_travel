@@ -1,16 +1,13 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { api, getGuestSessionId, clearGuestSessionId } from "./api";
-
-// Auth provider URL — set REACT_APP_AUTH_URL in your .env to point at any OAuth provider.
-// Default is the Emergent hosted auth; swap this out for Vercel/custom deployments.
-const AUTH_URL = process.env.REACT_APP_AUTH_URL || "https://auth.emergentagent.com";
+import { supabase } from "./supabase";
 
 const AuthContext = createContext({
   user: null,
   loading: true,
   refresh: async () => {},
-  signIn: () => {},
+  signIn: async () => {},
   signOut: async () => {},
 });
 
@@ -32,20 +29,21 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    // CRITICAL: If returning from OAuth callback, skip the /me check.
-    // AuthCallback will exchange the session_id and set the httpOnly cookie first.
-    // Intentionally reads window.location.hash once at mount — this is a one-time
-    // OAuth redirect detection, not a reactive location subscription.
-    if (window.location.hash?.includes("session_id=")) {
+    // Skip /auth/me check if we're on the callback route — AuthCallback sets the session.
+    if (window.location.pathname === "/auth/callback") {
       setLoading(false);
       return;
     }
     refresh();
   }, [refresh]);
 
-  const signIn = useCallback(() => {
-    const redirectUrl = window.location.origin + "/trips";
-    window.location.href = `${AUTH_URL}/?redirect=${encodeURIComponent(redirectUrl)}`;
+  const signIn = useCallback(async () => {
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
   }, []);
 
   const signOut = useCallback(async () => {
@@ -54,6 +52,7 @@ export const AuthProvider = ({ children }) => {
     } catch (_e) {
       /* ignore */
     }
+    await supabase.auth.signOut();
     clearGuestSessionId();
     setUser(null);
   }, []);
@@ -67,28 +66,26 @@ export const AuthProvider = ({ children }) => {
 
 export const AuthCallback = () => {
   const navigate = useNavigate();
-  const location = useLocation();
   const { refresh } = useAuth();
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    const hash = location.hash || window.location.hash;
-    const m = hash.match(/session_id=([^&]+)/);
-    if (!m) {
-      navigate("/auth/login", { replace: true });
-      return;
-    }
-    const sessionId = decodeURIComponent(m[1]);
     const guestId = localStorage.getItem("memento_guest_session_id");
-
     let cancelled = false;
+
     (async () => {
       try {
+        // supabase.auth.getSession() parses the access_token from the URL hash automatically
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError || !session) {
+          throw new Error(sessionError?.message || "No session returned from Supabase");
+        }
+
         await api.post("/auth/session", {
-          session_id: sessionId,
+          access_token: session.access_token,
           guest_session_id: guestId,
         });
-        // Server sets httpOnly cookie — no token stored in JS.
+
         await refresh();
         if (!cancelled) {
           window.history.replaceState(null, "", window.location.pathname);
@@ -96,15 +93,15 @@ export const AuthCallback = () => {
         }
       } catch (e) {
         if (!cancelled) {
-          setError(e?.response?.data?.detail || "Authentication failed");
+          setError(e?.response?.data?.detail || e.message || "Authentication failed");
           setTimeout(() => navigate("/auth/login", { replace: true }), 2200);
         }
       }
     })();
+
     return () => {
       cancelled = true;
     };
-    // Intentionally empty deps: runs once on mount to process OAuth callback hash.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -144,5 +141,4 @@ export const AuthCallback = () => {
   );
 };
 
-// Provides guest session id helper directly
 export { getGuestSessionId };
