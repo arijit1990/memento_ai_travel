@@ -35,16 +35,18 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 # Supabase JWT secret — used to verify user tokens locally (no outbound HTTP call)
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET")
 EXPORT_WEBHOOK_URL = os.environ.get("EXPORT_WEBHOOK_URL")
-FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
+FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000").rstrip("/")
 
-# CORS — always include the configured frontend URL plus any extras (comma-separated).
-# On Vercel, set CORS_ALLOWED_ORIGINS to your deployed frontend URL(s).
+# CORS — collect all allowed origins from env vars.
+# FRONTEND_BASE_URL      : primary frontend (required on Vercel)
+# CORS_ALLOWED_ORIGINS   : comma-separated additional origins
+# Always includes localhost for local dev.
 _extra_cors = [
-    o.strip()
+    o.strip().rstrip("/")
     for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
     if o.strip()
 ]
-CORS_ORIGINS = list({FRONTEND_BASE_URL, "http://localhost:3000", *_extra_cors})
+CORS_ORIGINS = list({FRONTEND_BASE_URL, "http://localhost:3000", "http://localhost:3001", *_extra_cors})
 
 # LLM model config — override via env vars for A/B testing or provider switching
 LLM_PRIMARY_PROVIDER = os.environ.get("LLM_PRIMARY_PROVIDER", "gemini")
@@ -65,7 +67,25 @@ async def lifespan(app: FastAPI):
     yield
 
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="Memento API", lifespan=lifespan)
+
+# CORS must be added BEFORE routers are included so it wraps all routes.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+logger.info("CORS allowed origins: %s", CORS_ORIGINS)
+
 api_router = APIRouter(prefix="/api")
 
 
@@ -192,6 +212,16 @@ async def require_user(
 @api_router.get("/")
 async def root():
     return {"message": "Memento API"}
+
+
+@api_router.get("/debug/cors")
+async def debug_cors():
+    """Returns the active CORS origins — useful for verifying Vercel env vars."""
+    return {
+        "cors_origins": CORS_ORIGINS,
+        "frontend_base_url": FRONTEND_BASE_URL,
+        "cors_allowed_origins_env": os.environ.get("CORS_ALLOWED_ORIGINS", ""),
+    }
 
 
 @api_router.post("/status", response_model=StatusCheck)
@@ -1095,17 +1125,3 @@ async def booking_prices(ids: str):
 # ---------------------------- App wiring ----------------------------
 
 app.include_router(api_router)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
