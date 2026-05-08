@@ -59,6 +59,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Memento API", lifespan=lifespan)
 api_router = APIRouter(prefix="/api")
 
+
+@app.get("/")
+async def health():
+    return {"status": "ok", "service": "Memento API"}
+
 # ---------------------------- Models ----------------------------
 
 class StatusCheck(BaseModel):
@@ -125,6 +130,16 @@ class ExportTripRequest(BaseModel):
     guest_session_id: Optional[str] = None
 
 
+# ---------------------------- DB client helper ----------------------------
+
+async def get_supa() -> AsyncClient:
+    """Return the Supabase client, initialising it lazily on Vercel cold starts."""
+    global supa
+    if supa is None:
+        supa = await create_async_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    return supa
+
+
 # ---------------------------- Auth helpers ----------------------------
 
 async def get_current_user(
@@ -136,7 +151,7 @@ async def get_current_user(
     if not token:
         return None
 
-    r = await supa.table("user_sessions").select("*").eq("session_token", token).maybe_single().execute()
+    r = await (await get_supa()).table("user_sessions").select("*").eq("session_token", token).maybe_single().execute()
     sess = r.data
     if not sess:
         return None
@@ -149,7 +164,7 @@ async def get_current_user(
     if expires_at and expires_at < datetime.now(timezone.utc):
         return None
 
-    r = await supa.table("users").select("*").eq("user_id", sess["user_id"]).maybe_single().execute()
+    r = await (await get_supa()).table("users").select("*").eq("user_id", sess["user_id"]).maybe_single().execute()
     return r.data
 
 
@@ -175,13 +190,13 @@ async def create_status_check(input: StatusCheckCreate):
     status_obj = StatusCheck(**input.model_dump())
     doc = status_obj.model_dump()
     doc["timestamp"] = doc["timestamp"].isoformat()
-    await supa.table("status_checks").insert(doc).execute()
+    await (await get_supa()).table("status_checks").insert(doc).execute()
     return status_obj
 
 
 @api_router.get("/status", response_model=List[StatusCheck])
 async def get_status_checks():
-    result = await supa.table("status_checks").select("*").limit(1000).execute()
+    result = await (await get_supa()).table("status_checks").select("*").limit(1000).execute()
     rows = result.data
     for r in rows:
         if isinstance(r.get("timestamp"), str):
@@ -228,14 +243,14 @@ async def auth_session(
         raise HTTPException(status_code=502, detail="Token missing email claim")
 
     # Upsert user
-    r = await supa.table("users").select("user_id").eq("email", email).maybe_single().execute()
+    r = await (await get_supa()).table("users").select("user_id").eq("email", email).maybe_single().execute()
     existing = r.data
     if existing:
         user_id = existing["user_id"]
-        await supa.table("users").update({"name": name, "picture": picture}).eq("user_id", user_id).execute()
+        await (await get_supa()).table("users").update({"name": name, "picture": picture}).eq("user_id", user_id).execute()
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
-        await supa.table("users").insert({
+        await (await get_supa()).table("users").insert({
             "user_id": user_id,
             "email": email,
             "name": name,
@@ -245,7 +260,7 @@ async def auth_session(
 
     # Store session (7 days)
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-    await supa.table("user_sessions").insert({
+    await (await get_supa()).table("user_sessions").insert({
         "user_id": user_id,
         "session_token": session_token,
         "expires_at": expires_at.isoformat(),
@@ -266,12 +281,12 @@ async def auth_session(
     # Claim guest trips if requested
     claimed = 0
     if guest_session_id:
-        r = await supa.table("trips").update(
+        r = await (await get_supa()).table("trips").update(
             {"user_id": user_id, "guest_session_id": None}
         ).eq("guest_session_id", guest_session_id).is_("user_id", "null").execute()
         claimed = len(r.data)
 
-    r = await supa.table("users").select("*").eq("user_id", user_id).maybe_single().execute()
+    r = await (await get_supa()).table("users").select("*").eq("user_id", user_id).maybe_single().execute()
     # session_token intentionally omitted from response body — only in httpOnly cookie.
     return {"user": r.data, "trips_claimed": claimed}
 
@@ -288,7 +303,7 @@ async def auth_logout(
     session_token: Optional[str] = Cookie(default=None),
 ):
     if session_token:
-        await supa.table("user_sessions").delete().eq("session_token", session_token).execute()
+        await (await get_supa()).table("user_sessions").delete().eq("session_token", session_token).execute()
     response.delete_cookie("session_token", path="/")
     return {"ok": True}
 
@@ -298,7 +313,7 @@ async def claim_guest(
     body: ClaimGuestRequest,
     user: Dict[str, Any] = Depends(require_user),
 ):
-    r = await supa.table("trips").update(
+    r = await (await get_supa()).table("trips").update(
         {"user_id": user["user_id"], "guest_session_id": None}
     ).eq("guest_session_id", body.guest_session_id).is_("user_id", "null").execute()
     return {"claimed": len(r.data)}
@@ -497,7 +512,7 @@ async def generate_trip(
         "created_at": datetime.now(timezone.utc).isoformat(),
         "trip": {**trip_json, "id": trip_id, "cover": None},
     }
-    await supa.table("trips").insert(doc).execute()
+    await (await get_supa()).table("trips").insert(doc).execute()
 
     return {"trip_id": trip_id, "trip": doc["trip"], "model": used_model}
 
@@ -603,7 +618,7 @@ async def generate_trip_stream(
             "created_at": datetime.now(timezone.utc).isoformat(),
             "trip": {**trip_json, "id": trip_id, "cover": None},
         }
-        await supa.table("trips").insert(doc).execute()
+        await (await get_supa()).table("trips").insert(doc).execute()
         yield evt({"type": "done", "trip_id": trip_id, "trip": doc["trip"], "model": used_model})
 
     return StreamingResponse(
@@ -629,9 +644,9 @@ async def list_trips(
     if not user and not guest_session_id:
         return {"trips": []}
     if user:
-        result = await supa.table("trips").select("*").eq("user_id", user["user_id"]).order("created_at", desc=True).limit(100).execute()
+        result = await (await get_supa()).table("trips").select("*").eq("user_id", user["user_id"]).order("created_at", desc=True).limit(100).execute()
     else:
-        result = await supa.table("trips").select("*").eq("guest_session_id", guest_session_id).is_("user_id", "null").order("created_at", desc=True).limit(100).execute()
+        result = await (await get_supa()).table("trips").select("*").eq("guest_session_id", guest_session_id).is_("user_id", "null").order("created_at", desc=True).limit(100).execute()
     rows = result.data
     summaries = []
     for r in rows:
@@ -656,7 +671,7 @@ async def get_trip(
     guest_session_id: Optional[str] = None,
     session_token: Optional[str] = Cookie(default=None),
 ):
-    r = await supa.table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
+    r = await (await get_supa()).table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
     row = r.data
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
@@ -679,7 +694,7 @@ async def delete_trip(
     guest_session_id: Optional[str] = None,
     session_token: Optional[str] = Cookie(default=None),
 ):
-    r = await supa.table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
+    r = await (await get_supa()).table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
     row = r.data
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
@@ -690,7 +705,7 @@ async def delete_trip(
     else:
         if row.get("guest_session_id") != guest_session_id:
             raise HTTPException(status_code=403, detail="Not your trip")
-    await supa.table("trips").delete().eq("trip_id", trip_id).execute()
+    await (await get_supa()).table("trips").delete().eq("trip_id", trip_id).execute()
     return {"ok": True}
 
 
@@ -808,7 +823,7 @@ async def edit_trip(
     guest_session_id: Optional[str] = None,
     session_token: Optional[str] = Cookie(default=None),
 ):
-    r = await supa.table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
+    r = await (await get_supa()).table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
     row = r.data
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
@@ -849,7 +864,7 @@ async def edit_trip(
     new_trip["id"] = trip_id
     new_trip["cover"] = row["trip"].get("cover")
 
-    await supa.table("trips").update(
+    await (await get_supa()).table("trips").update(
         {"trip": new_trip, "updated_at": datetime.now(timezone.utc).isoformat(), "last_model": used_model}
     ).eq("trip_id", trip_id).execute()
     return {"trip": new_trip, "model": used_model}
@@ -864,7 +879,7 @@ async def create_share(
     guest_session_id: Optional[str] = None,
     session_token: Optional[str] = Cookie(default=None),
 ):
-    r = await supa.table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
+    r = await (await get_supa()).table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
     row = r.data
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
@@ -877,7 +892,7 @@ async def create_share(
             raise HTTPException(status_code=403, detail="Not your trip")
 
     token = uuid.uuid4().hex[:18]
-    await supa.table("shares").insert({
+    await (await get_supa()).table("shares").insert({
         "token": token,
         "trip_id": trip_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -887,11 +902,11 @@ async def create_share(
 
 @api_router.get("/share/{token}")
 async def read_share(token: str):
-    r = await supa.table("shares").select("*").eq("token", token).maybe_single().execute()
+    r = await (await get_supa()).table("shares").select("*").eq("token", token).maybe_single().execute()
     s = r.data
     if not s:
         raise HTTPException(status_code=404, detail="Share not found")
-    r = await supa.table("trips").select("*").eq("trip_id", s["trip_id"]).maybe_single().execute()
+    r = await (await get_supa()).table("trips").select("*").eq("trip_id", s["trip_id"]).maybe_single().execute()
     row = r.data
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
@@ -910,9 +925,9 @@ async def list_saved(
     if not user and not guest_session_id:
         return {"items": []}
     if user:
-        result = await supa.table("saved_items").select("*").eq("user_id", user["user_id"]).order("created_at", desc=True).limit(200).execute()
+        result = await (await get_supa()).table("saved_items").select("*").eq("user_id", user["user_id"]).order("created_at", desc=True).limit(200).execute()
     else:
-        result = await supa.table("saved_items").select("*").eq("guest_session_id", guest_session_id).is_("user_id", "null").order("created_at", desc=True).limit(200).execute()
+        result = await (await get_supa()).table("saved_items").select("*").eq("guest_session_id", guest_session_id).is_("user_id", "null").order("created_at", desc=True).limit(200).execute()
     return {"items": result.data}
 
 
@@ -941,7 +956,7 @@ async def create_saved(
         "trip_id": body.trip_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    await supa.table("saved_items").insert(doc).execute()
+    await (await get_supa()).table("saved_items").insert(doc).execute()
     return {"item": doc}
 
 
@@ -952,7 +967,7 @@ async def delete_saved(
     guest_session_id: Optional[str] = None,
     session_token: Optional[str] = Cookie(default=None),
 ):
-    r = await supa.table("saved_items").select("*").eq("id", item_id).maybe_single().execute()
+    r = await (await get_supa()).table("saved_items").select("*").eq("id", item_id).maybe_single().execute()
     item = r.data
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
@@ -963,7 +978,7 @@ async def delete_saved(
     else:
         if item.get("guest_session_id") != guest_session_id:
             raise HTTPException(status_code=403, detail="Not yours")
-    await supa.table("saved_items").delete().eq("id", item_id).execute()
+    await (await get_supa()).table("saved_items").delete().eq("id", item_id).execute()
     return {"ok": True}
 
 
@@ -983,7 +998,7 @@ async def export_trip(
     if not EXPORT_WEBHOOK_URL:
         raise HTTPException(status_code=503, detail="Export webhook not configured")
 
-    r = await supa.table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
+    r = await (await get_supa()).table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
     row = r.data
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
@@ -997,11 +1012,11 @@ async def export_trip(
             raise HTTPException(status_code=403, detail="Not your trip")
 
     # Ensure a share token exists so the email can include a public link
-    r = await supa.table("shares").select("token").eq("trip_id", trip_id).maybe_single().execute()
+    r = await (await get_supa()).table("shares").select("token").eq("trip_id", trip_id).maybe_single().execute()
     share = r.data
     if not share:
         token = uuid.uuid4().hex[:18]
-        await supa.table("shares").insert({
+        await (await get_supa()).table("shares").insert({
             "token": token,
             "trip_id": trip_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -1026,7 +1041,7 @@ async def export_trip(
         logging.exception("Export webhook failed")
         raise HTTPException(status_code=502, detail=f"Webhook delivery failed: {e}")
 
-    await supa.table("exports").insert({
+    await (await get_supa()).table("exports").insert({
         "trip_id": trip_id,
         "email": body.email,
         "webhook_status": webhook_status,
