@@ -221,7 +221,7 @@ async def root():
 async def debug_cors():
     """Returns the active CORS origins — useful for verifying Vercel env vars."""
     return {
-        "v": "b1c2195",
+        "v": "sync-httpx",
         "cors_origins": CORS_ORIGINS,
         "frontend_base_url": FRONTEND_BASE_URL,
         "cors_allowed_origins_env": os.environ.get("CORS_ALLOWED_ORIGINS", ""),
@@ -264,19 +264,22 @@ async def auth_session(
     if not access_token:
         raise HTTPException(status_code=400, detail="access_token required")
 
-    # Verify token by calling Supabase auth API directly with httpx.
-    # This avoids supabase-py async client issues on Vercel serverless cold starts.
-    async with httpx.AsyncClient(timeout=10.0) as hx:
-        r = await hx.get(
+    # Verify token by calling Supabase auth API.
+    # Use synchronous httpx — avoids async context manager issues on Vercel/Mangum.
+    try:
+        supa_resp = httpx.get(
             f"{SUPABASE_URL}/auth/v1/user",
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "apikey": SUPABASE_SERVICE_ROLE_KEY,
             },
+            timeout=10.0,
         )
-    if r.status_code != 200:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {r.text}")
-    supa_user = r.json()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Auth service unreachable: {e}")
+    if supa_resp.status_code != 200:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {supa_resp.text}")
+    supa_user = supa_resp.json()
 
     email = supa_user.get("email")
     user_metadata = supa_user.get("user_metadata") or {}
