@@ -221,6 +221,7 @@ async def root():
 async def debug_cors():
     """Returns the active CORS origins — useful for verifying Vercel env vars."""
     return {
+        "v": "b1c2195",
         "cors_origins": CORS_ORIGINS,
         "frontend_base_url": FRONTEND_BASE_URL,
         "cors_allowed_origins_env": os.environ.get("CORS_ALLOWED_ORIGINS", ""),
