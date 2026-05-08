@@ -9,6 +9,7 @@ import { ItineraryPanel } from "@/components/itinerary/ItineraryPanel";
 import { SAMPLE_CHAT } from "@/lib/mockData";
 import { api, getGuestSessionId } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { cleanDestination } from "@/lib/intake";
 
 const Chat = () => {
   const { user } = useAuth();
@@ -18,73 +19,28 @@ const Chat = () => {
   const [generating, setGenerating] = useState(false);
   const [trip, setTrip] = useState(null);
   const [confirmSummary, setConfirmSummary] = useState([]);
-  const [intake, setIntake] = useState(null);
-  const [intakeStep, setIntakeStep] = useState("destination"); // 'destination' | 'dates' | 'group' | 'vibe' | 'done'
+  const [intake, setIntake] = useState({});
   const [editing, setEditing] = useState(false);
+  const [thinking, setThinking] = useState(false);
   const [mobileView, setMobileView] = useState("chat"); // 'chat' | 'itinerary' (mobile only)
 
   useEffect(() => {
     if (!user) getGuestSessionId();
   }, [user]);
 
-  // Strip filler phrases like "I want to go to X" → "X" — purely cosmetic, falls back to raw text.
-  const cleanDestination = (text) => {
-    let t = text.trim().replace(/[?!.]+$/g, "");
-    // Apply prefix-strip patterns iteratively until nothing changes
-    const patterns = [
-      /^(hi|hey|hello|so|well|okay|ok|um|uh)[,\s]+/i,
-      /^(i|we|we're|we are|i'?[a-z]+|i am|y'?all|you|you'?re)\s+/i,
-      /^(want|wanna|would\s+like|like|love|'d\s+like|am\s+thinking|am\s+planning|think|plan|hope|wish|considering|looking|need)(ing|ed|s)?\s+/i,
-      /^(to|of|about|on|for)\s+/i,
-      /^(go(ing)?|travel(l?ing)?|visit(ing)?|head(ing)?|plan(ning)?|take|do|try)\s+/i,
-      /^(a\s+)?(trip|holiday|vacation|getaway|escape)\s+/i,
-      /^(to|for|in|at|around|towards?)\s+/i,
-      /^(the\s+)/i,
-      /^(let'?s|how about|maybe|perhaps|thinking|planning|considering)\s+/i,
-    ];
-    let prev;
-    do {
-      prev = t;
-      for (const re of patterns) {
-        t = t.replace(re, "");
-      }
-    } while (t !== prev && t.length > 0);
-    // Also strip trailing duration/group hints — "Goa for a week" → "Goa"
-    t = t.replace(/\s+for\s+(a\s+|the\s+)?(\d+\s+)?(day|week|month|weekend|while|bit|moment).*$/i, "");
-    t = t.trim();
-    // Capitalize first letter of each word for nicer display
-    if (t && t.length > 0) {
-      t = t
-        .split(/\s+/)
-        .map((w) => (w.length > 2 ? w[0].toUpperCase() + w.slice(1) : w))
-        .join(" ");
-    }
-    return t || text.trim();
-  };
+  const buildSummary = (data) => [
+    { label: "Destination", value: data.destination || "—" },
+    { label: "When", value: data.dates || "Flexible" },
+    { label: "Group", value: data.group || "2 adults" },
+    { label: "Vibe", value: (data.travelerType || []).join(" · ") || "Explorer" },
+    { label: "Trip type", value: data.tripType || "City Break" },
+    { label: "Budget", value: data.budget || "Flexible" },
+  ];
 
-  const detectGroup = (lower) => {
-    if (/\bsolo\b|\balone\b|\bjust me\b|\bby myself\b/.test(lower)) return "Solo";
-    if (/\bcouple\b|\bpartner\b|\bspouse\b|\bgirlfriend\b|\bboyfriend\b|\bwife\b|\bhusband\b|\bhoneymoon\b|\b(two|2)\b/.test(lower)) return "2 adults";
-    if (/\bfamily\b|\bkids?\b|\bchildren\b/.test(lower)) return "Family with kids";
-    if (/\bfriends?\b|\b(three|3|four|4|five|5)\b/.test(lower)) return "Friends (3-5)";
-    if (/\bgroup\b/.test(lower)) return "Friends (6+)";
-    return null;
-  };
-
-  const detectTravelerTypes = (lower) => {
-    const types = [];
-    if (/\b(food|culinary|eat|foodie|restaurant|wine|gastronomy)\b/.test(lower)) types.push("Food Lover");
-    if (/\b(culture|art|museum|history|architecture|gallery)\b/.test(lower)) types.push("Culture Seeker");
-    if (/\b(adventure|hike|hiking|outdoor|trek|surf|climb)\b/.test(lower)) types.push("Adventure Seeker");
-    if (/\b(wellness|relax|spa|yoga|retreat|quiet|slow)\b/.test(lower)) types.push("Wellness Traveller");
-    if (/\b(luxury|luxurious|premium|five-?star|fine)\b/.test(lower)) types.push("Luxury Traveller");
-    if (/\b(party|nightlife|club|bars?)\b/.test(lower)) types.push("Party Animal");
-    return types;
-  };
-
-  const handleSend = (text) => {
+  const handleSend = async (text) => {
     const userMsg = { id: `m-${Date.now()}`, role: "user", content: text };
-    setMessages((m) => [...m, userMsg]);
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
 
     // If we already have a trip, treat the message as an EDIT request
     if (trip) {
@@ -92,80 +48,45 @@ const Chat = () => {
       return;
     }
 
-    // Step-machine intake: every reply advances state by exactly one step.
-    setTimeout(() => {
-      const lower = text.toLowerCase();
-      const detected = {
-        ...(intake || {
-          destination: "",
-          dates: "Flexible",
-          group: "",
-          travelerType: [],
-          tripType: "City Break",
-          budget: "Flexible",
-        }),
-      };
-      let reply;
-      let nextStep = intakeStep;
+    // LLM-driven intake extraction (gemini-2.5-flash, ~$0.0001/call)
+    setThinking(true);
+    try {
+      const r = await api.post("/chat/intake", {
+        messages: newMessages.map(({ role, content }) => ({ role, content })),
+        current_intake: intake,
+      });
+      const { intake: newIntake, next_question, complete } = r.data;
+      setIntake(newIntake);
 
-      if (intakeStep === "destination") {
-        detected.destination = cleanDestination(text);
-        nextStep = "group";
-        reply = {
-          id: `m-${Date.now() + 1}`,
-          role: "ai",
-          content: `${detected.destination} — lovely choice. Who's coming along? Solo, a couple, family, or a group of friends? And roughly when are you thinking?`,
-        };
-      } else if (intakeStep === "group") {
-        detected.group = detectGroup(lower) || "2 adults";
-        // Try to grab a date phrase if mentioned in the same message
-        const dateMatch = text.match(/\b(spring|summer|fall|autumn|winter|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec|next\s+(week|month|year)|this\s+(week|month|year)|weekend|long weekend|\d+\s+(day|week|month)s?)\b/i);
-        if (dateMatch) detected.dates = dateMatch[0];
-        nextStep = "vibe";
-        reply = {
-          id: `m-${Date.now() + 1}`,
-          role: "ai",
-          content: "Got it. What kind of vibe are you after — culture-heavy, food-forward, adventurous, slow & restful, party? Anything that resonates is fine.",
-        };
-      } else if (intakeStep === "vibe") {
-        const types = detectTravelerTypes(lower);
-        detected.travelerType = types.length > 0 ? types : ["Explorer"];
-        // Pick up budget if mentioned
-        const budgetMatch = text.match(/\$[\d,kK]+(\s*[-–to]+\s*\$?[\d,kK]+)?/);
-        if (budgetMatch) detected.budget = budgetMatch[0];
-        nextStep = "done";
-        reply = {
-          id: `m-${Date.now() + 1}`,
-          role: "ai",
-          content: "Perfect — let me read this back to make sure I have it right.",
-        };
-      } else {
-        // 'done' but user keeps chatting before confirming — gently nudge to confirm or restart
-        reply = {
-          id: `m-${Date.now() + 1}`,
-          role: "ai",
-          content: "I have what I need — tap 'Yes, generate it' above when you're ready, or tell me what to change.",
-        };
+      if (next_question) {
+        setMessages((m) => [
+          ...m,
+          {
+            id: `m-${Date.now() + 1}`,
+            role: "ai",
+            content: next_question,
+          },
+        ]);
       }
-
-      setIntake(detected);
-      setIntakeStep(nextStep);
-      setMessages((m) => [...m, reply]);
-
-      if (nextStep === "done") {
+      if (complete) {
         setTimeout(() => {
-          setConfirmSummary([
-            { label: "Destination", value: detected.destination },
-            { label: "When", value: detected.dates || "Flexible" },
-            { label: "Group", value: detected.group || "2 adults" },
-            { label: "Vibe", value: (detected.travelerType || []).join(" · ") || "Explorer" },
-            { label: "Trip type", value: detected.tripType || "City Break" },
-            { label: "Budget", value: detected.budget || "Flexible" },
-          ]);
+          setConfirmSummary(buildSummary(newIntake));
           setShowConfirm(true);
-        }, 600);
+        }, 400);
       }
-    }, 700);
+    } catch (e) {
+      const msg = e?.response?.data?.detail || "Network blip";
+      setMessages((m) => [
+        ...m,
+        {
+          id: `m-${Date.now() + 1}`,
+          role: "ai",
+          content: `Hmm, I missed that — could you say that again? (${msg})`,
+        },
+      ]);
+    } finally {
+      setThinking(false);
+    }
   };
 
   const handleEdit = async (message) => {
@@ -212,17 +133,11 @@ const Chat = () => {
   };
 
   const handleWizardComplete = (data) => {
+    // Apply destination cleanup so confirm card looks tidy even when user types verbosely
+    const cleaned = { ...data, destination: cleanDestination(data.destination) };
     setMode("chat");
-    setIntake(data);
-    setIntakeStep("done");
-    setConfirmSummary([
-      { label: "Destination", value: data.destination },
-      { label: "When", value: data.dates },
-      { label: "Group", value: data.group },
-      { label: "Vibe", value: data.travelerType.join(" · ") },
-      { label: "Trip type", value: data.tripType },
-      { label: "Budget", value: data.budget },
-    ]);
+    setIntake(cleaned);
+    setConfirmSummary(buildSummary(cleaned));
     setMessages([
       ...SAMPLE_CHAT,
       {
@@ -248,7 +163,10 @@ const Chat = () => {
           destination: intake?.destination || "Paris, France",
           dates: intake?.dates || "Flexible",
           group: intake?.group || "2 adults",
-          travelerType: intake?.travelerType || ["Explorer"],
+          travelerType:
+            (intake?.travelerType && intake.travelerType.length > 0)
+              ? intake.travelerType
+              : ["Explorer"],
           tripType: intake?.tripType || "City Break",
           budget: intake?.budget || "Flexible",
         },
@@ -302,7 +220,6 @@ const Chat = () => {
       className="flex h-screen w-full bg-memento-cream overflow-hidden"
       data-testid="chat-page"
     >
-      {/* Left: Chat / Wizard */}
       <div
         className={`w-full md:w-[45%] lg:w-[42%] xl:w-[40%] h-full flex flex-col border-r border-memento-parchment bg-white relative ${
           showItineraryMobile ? "hidden md:flex" : "flex"
@@ -335,28 +252,32 @@ const Chat = () => {
             messages={messages}
             onSend={handleSend}
             onConfirm={handleConfirm}
-            generating={generating || editing}
-            generatingLabel={editing ? "Rewriting your itinerary..." : "Handcrafting your itinerary..."}
+            generating={generating || editing || thinking}
+            generatingLabel={
+              editing
+                ? "Rewriting your itinerary..."
+                : thinking
+                ? "Thinking..."
+                : "Handcrafting your itinerary..."
+            }
             onSwitchToWizard={() => setMode("wizard")}
             showConfirmCard={showConfirm}
             confirmSummary={confirmSummary}
             placeholder={
               trip
                 ? "Make day 3 less touristy. Or add a romantic dinner..."
-                : "Ask Memento anything — 'Plan a Paris trip for 2'..."
+                : "Tell me where you're going — 'Paris with my partner for a week, food and art'..."
             }
           />
         )}
       </div>
 
-      {/* Right: Itinerary preview */}
       <div
         className={`md:flex md:w-[55%] lg:w-[58%] xl:w-[60%] h-full bg-memento-cream flex-col ${
           showItineraryMobile ? "flex w-full" : "hidden"
         }`}
         data-testid="itinerary-side-panel"
       >
-        {/* Mobile back to chat bar */}
         {showItineraryMobile && (
           <div className="md:hidden border-b border-memento-parchment px-4 py-3 flex items-center justify-between bg-white">
             <button

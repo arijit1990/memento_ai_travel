@@ -506,8 +506,85 @@ async def delete_trip(
     return {"ok": True}
 
 
-# ---------------------------- Trip edit (conversational) ----------------------------
+# ---------------------------- Chat intake (LLM extractor) ----------------------------
 
+INTAKE_SYSTEM_PROMPT = """You are Memento's intake assistant. Your job is to extract trip-planning data from a casual chat with the user, and propose the next short, friendly question to ask.
+
+You will receive:
+1. The conversation so far (user + assistant messages)
+2. The current best-known intake state
+
+You must respond with ONLY valid JSON (no markdown fences, no commentary) matching:
+
+{
+  "intake": {
+    "destination": "string — city/region/country, cleanly formatted (e.g. 'Amalfi Coast' not 'a trip to the Amalfi Coast'). Empty string if unknown.",
+    "dates": "string — natural date phrase (e.g. 'mid April 2026', 'next October', 'a week in spring'). 'Flexible' if unknown.",
+    "group": "string — one of: 'Solo' | '2 adults' | 'Family with kids' | 'Friends (3-5)' | 'Friends (6+)'. Empty string if unknown.",
+    "travelerType": ["array of: 'Explorer' | 'Food Lover' | 'Culture Seeker' | 'Adventure Seeker' | 'Wellness Traveller' | 'Luxury Traveller' | 'Party Animal'. Empty array if unknown."],
+    "tripType": "string — one of: 'City Break' | 'Beach & Relaxation' | 'Honeymoon' | 'Road Trip' | 'Adventure' | 'Wellness Retreat' | 'Family Reunion' | 'Cruise' | 'Ski & Snow' | 'General Leisure'. Default 'City Break' if unclear.",
+    "budget": "string — natural budget phrase (e.g. '$2,500', '$1k–$3k', 'mid-range'). 'Flexible' if unknown."
+  },
+  "next_question": "string — the next short, warm, single-sentence question to ask the user. Empty string if intake is complete enough to generate.",
+  "complete": boolean — true if we have at least destination + group + traveler type or vibe; false otherwise.
+}
+
+Rules:
+- Always carry forward existing values from current_intake unless the user has provided a new value.
+- Extract aggressively: a single message like 'Goa for a week with my partner, food lovers, $2k' fills FOUR slots at once.
+- Capitalize destinations properly ('kerala' → 'Kerala').
+- Strip filler ('I want to go to Paris' → 'Paris').
+- next_question must be single short sentence, conversational, never repeat what the user already answered.
+- When complete=true, next_question can be a confirmation prompt like "Perfect — let me read this back to make sure I have it right."
+- Never output anything other than the JSON object."""
+
+
+class IntakeRequest(BaseModel):
+    messages: List[Dict[str, str]]
+    current_intake: Optional[Dict[str, Any]] = None
+
+
+@api_router.post("/chat/intake")
+async def chat_intake(body: IntakeRequest):
+    """Cheap LLM call to parse free-text chat into structured intake.
+    Uses gemini-2.5-flash-lite (~$0.0001/call)."""
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+    convo_lines = []
+    for m in body.messages[-12:]:  # cap context — recent only
+        role = m.get("role", "user")
+        prefix = "User" if role == "user" else "Assistant"
+        convo_lines.append(f"{prefix}: {m.get('content', '')[:800]}")
+    convo_text = "\n".join(convo_lines)
+
+    prompt = (
+        f"Conversation so far:\n{convo_text}\n\n"
+        f"Current intake state: {json.dumps(body.current_intake or {})}\n\n"
+        f"Return the updated intake JSON now."
+    )
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"intake-{uuid.uuid4().hex[:8]}",
+        system_message=INTAKE_SYSTEM_PROMPT,
+    ).with_model("gemini", "gemini-2.5-flash")
+    user_msg = UserMessage(text=prompt)
+    try:
+        raw = await asyncio.wait_for(chat.send_message(user_msg), timeout=20)
+    except Exception as e:
+        logging.exception("Intake LLM failed")
+        raise HTTPException(status_code=503, detail=f"Intake LLM failed: {e}")
+
+    try:
+        parsed = extract_json(raw)
+    except Exception as e:
+        logging.error("Intake JSON parse failed. Raw:\n%s", raw[:1000])
+        raise HTTPException(status_code=502, detail=f"Malformed JSON: {e}")
+
+    return parsed
+
+
+# ---------------------------- Trip edit (conversational) ----------------------------
 EDIT_SYSTEM_PROMPT = """You are Memento, editing an existing travel itinerary.
 
 You will receive the current itinerary JSON and the user's edit request in plain English.
