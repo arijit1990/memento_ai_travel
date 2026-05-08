@@ -397,7 +397,7 @@ async def generate_trip(
     used_model = None
     last_err = None
     attempts = [
-        ("gemini", "gemini-3.1-pro-preview"),
+        ("gemini", "gemini-2.5-flash"),
         ("anthropic", "claude-sonnet-4-5-20250929"),
     ]
     for provider, model in attempts:
@@ -465,7 +465,7 @@ async def generate_trip_stream(
 
         # Schedule LLM call as a background task; emit status updates while it runs
         attempts = [
-            ("gemini", "gemini-3.1-pro-preview"),
+            ("gemini", "gemini-2.5-flash"),
             ("anthropic", "claude-sonnet-4-5-20250929"),
         ]
         timed_statuses = [
@@ -751,7 +751,7 @@ async def edit_trip(
     used_model = None
     last_err = None
     for provider, model in [
-        ("gemini", "gemini-3.1-pro-preview"),
+        ("gemini", "gemini-2.5-flash"),
         ("anthropic", "claude-sonnet-4-5-20250929"),
     ]:
         try:
