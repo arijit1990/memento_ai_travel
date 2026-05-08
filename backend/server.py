@@ -547,7 +547,8 @@ class IntakeRequest(BaseModel):
 @api_router.post("/chat/intake")
 async def chat_intake(body: IntakeRequest):
     """Cheap LLM call to parse free-text chat into structured intake.
-    Uses gemini-2.5-flash-lite (~$0.0001/call)."""
+    Uses gemini-2.5-flash (~$0.0001/call). Caps history at last 12 messages
+    and 800 chars each to keep token cost bounded."""
     from emergentintegrations.llm.chat import LlmChat, UserMessage
 
     convo_lines = []
