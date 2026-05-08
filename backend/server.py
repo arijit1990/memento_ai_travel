@@ -37,6 +37,15 @@ SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET")
 EXPORT_WEBHOOK_URL = os.environ.get("EXPORT_WEBHOOK_URL")
 FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
 
+# CORS — always include the configured frontend URL plus any extras (comma-separated).
+# On Vercel, set CORS_ALLOWED_ORIGINS to your deployed frontend URL(s).
+_extra_cors = [
+    o.strip()
+    for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
+    if o.strip()
+]
+CORS_ORIGINS = list({FRONTEND_BASE_URL, "http://localhost:3000", *_extra_cors})
+
 # LLM model config — override via env vars for A/B testing or provider switching
 LLM_PRIMARY_PROVIDER = os.environ.get("LLM_PRIMARY_PROVIDER", "gemini")
 LLM_PRIMARY_MODEL = os.environ.get("LLM_PRIMARY_MODEL", "gemini-2.5-flash")
@@ -1047,7 +1056,7 @@ async def export_trip(
         "webhook_status": webhook_status,
         "share_token": token,
         "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    }).execute()
     return {"ok": webhook_status < 400, "share_token": token, "webhook_status": webhook_status}
 
 
@@ -1089,7 +1098,7 @@ app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_BASE_URL],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
