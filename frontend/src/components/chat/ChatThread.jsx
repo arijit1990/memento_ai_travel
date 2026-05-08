@@ -112,7 +112,12 @@ export const ChatThread = ({
                 ))}
               </div>
               <p className="text-xs text-memento-coffee mb-4 italic">
-                Want me to handcraft your Paris itinerary now?
+                {(() => {
+                  const dest = confirmSummary.find((r) => r.label === "Destination")?.value;
+                  return dest
+                    ? `Want me to handcraft your ${dest} itinerary now?`
+                    : "Want me to handcraft your itinerary now?";
+                })()}
               </p>
               <div className="flex gap-2">
                 <Button

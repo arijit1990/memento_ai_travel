@@ -19,12 +19,68 @@ const Chat = () => {
   const [trip, setTrip] = useState(null);
   const [confirmSummary, setConfirmSummary] = useState([]);
   const [intake, setIntake] = useState(null);
+  const [intakeStep, setIntakeStep] = useState("destination"); // 'destination' | 'dates' | 'group' | 'vibe' | 'done'
   const [editing, setEditing] = useState(false);
   const [mobileView, setMobileView] = useState("chat"); // 'chat' | 'itinerary' (mobile only)
 
   useEffect(() => {
     if (!user) getGuestSessionId();
   }, [user]);
+
+  // Strip filler phrases like "I want to go to X" → "X" — purely cosmetic, falls back to raw text.
+  const cleanDestination = (text) => {
+    let t = text.trim().replace(/[?!.]+$/g, "");
+    // Apply prefix-strip patterns iteratively until nothing changes
+    const patterns = [
+      /^(hi|hey|hello|so|well|okay|ok|um|uh)[,\s]+/i,
+      /^(i|we|we're|we are|i'?[a-z]+|i am|y'?all|you|you'?re)\s+/i,
+      /^(want|wanna|would\s+like|like|love|'d\s+like|am\s+thinking|am\s+planning|think|plan|hope|wish|considering|looking|need)(ing|ed|s)?\s+/i,
+      /^(to|of|about|on|for)\s+/i,
+      /^(go(ing)?|travel(l?ing)?|visit(ing)?|head(ing)?|plan(ning)?|take|do|try)\s+/i,
+      /^(a\s+)?(trip|holiday|vacation|getaway|escape)\s+/i,
+      /^(to|for|in|at|around|towards?)\s+/i,
+      /^(the\s+)/i,
+      /^(let'?s|how about|maybe|perhaps|thinking|planning|considering)\s+/i,
+    ];
+    let prev;
+    do {
+      prev = t;
+      for (const re of patterns) {
+        t = t.replace(re, "");
+      }
+    } while (t !== prev && t.length > 0);
+    // Also strip trailing duration/group hints — "Goa for a week" → "Goa"
+    t = t.replace(/\s+for\s+(a\s+|the\s+)?(\d+\s+)?(day|week|month|weekend|while|bit|moment).*$/i, "");
+    t = t.trim();
+    // Capitalize first letter of each word for nicer display
+    if (t && t.length > 0) {
+      t = t
+        .split(/\s+/)
+        .map((w) => (w.length > 2 ? w[0].toUpperCase() + w.slice(1) : w))
+        .join(" ");
+    }
+    return t || text.trim();
+  };
+
+  const detectGroup = (lower) => {
+    if (/\bsolo\b|\balone\b|\bjust me\b|\bby myself\b/.test(lower)) return "Solo";
+    if (/\bcouple\b|\bpartner\b|\bspouse\b|\bgirlfriend\b|\bboyfriend\b|\bwife\b|\bhusband\b|\bhoneymoon\b|\b(two|2)\b/.test(lower)) return "2 adults";
+    if (/\bfamily\b|\bkids?\b|\bchildren\b/.test(lower)) return "Family with kids";
+    if (/\bfriends?\b|\b(three|3|four|4|five|5)\b/.test(lower)) return "Friends (3-5)";
+    if (/\bgroup\b/.test(lower)) return "Friends (6+)";
+    return null;
+  };
+
+  const detectTravelerTypes = (lower) => {
+    const types = [];
+    if (/\b(food|culinary|eat|foodie|restaurant|wine|gastronomy)\b/.test(lower)) types.push("Food Lover");
+    if (/\b(culture|art|museum|history|architecture|gallery)\b/.test(lower)) types.push("Culture Seeker");
+    if (/\b(adventure|hike|hiking|outdoor|trek|surf|climb)\b/.test(lower)) types.push("Adventure Seeker");
+    if (/\b(wellness|relax|spa|yoga|retreat|quiet|slow)\b/.test(lower)) types.push("Wellness Traveller");
+    if (/\b(luxury|luxurious|premium|five-?star|fine)\b/.test(lower)) types.push("Luxury Traveller");
+    if (/\b(party|nightlife|club|bars?)\b/.test(lower)) types.push("Party Animal");
+    return types;
+  };
 
   const handleSend = (text) => {
     const userMsg = { id: `m-${Date.now()}`, role: "user", content: text };
@@ -36,60 +92,67 @@ const Chat = () => {
       return;
     }
 
-    // Otherwise, intake conversation flow
+    // Step-machine intake: every reply advances state by exactly one step.
     setTimeout(() => {
       const lower = text.toLowerCase();
+      const detected = {
+        ...(intake || {
+          destination: "",
+          dates: "Flexible",
+          group: "",
+          travelerType: [],
+          tripType: "City Break",
+          budget: "Flexible",
+        }),
+      };
       let reply;
-      let triggerConfirm = false;
-      let detected = { ...(intake || { destination: "", dates: "Flexible", group: "2 adults", travelerType: [], tripType: "City Break", budget: "Flexible" }) };
+      let nextStep = intakeStep;
 
-      const cityMatch = text.match(/\b(Paris|Tokyo|Lisbon|Bali|New York|Kyoto|Marrakech|Reykjavik|Santorini|London|Rome|Barcelona|Amsterdam|Berlin|Bangkok|Seoul|Mexico City|Buenos Aires|Cape Town|Istanbul|Dubai)\b/i);
-      if (cityMatch) detected.destination = cityMatch[0];
-
-      if (!detected.destination) {
+      if (intakeStep === "destination") {
+        detected.destination = cleanDestination(text);
+        nextStep = "group";
         reply = {
           id: `m-${Date.now() + 1}`,
           role: "ai",
-          content: "Lovely thought — what city or region are you dreaming of? Tell me a place and a rough timeframe.",
+          content: `${detected.destination} — lovely choice. Who's coming along? Solo, a couple, family, or a group of friends? And roughly when are you thinking?`,
         };
-      } else if (!lower.match(/\b(couple|solo|family|friends|2|two|3|three|4|four)\b/) && !detected.group?.match(/(adult|couple|family|friend)/i)) {
+      } else if (intakeStep === "group") {
+        detected.group = detectGroup(lower) || "2 adults";
+        // Try to grab a date phrase if mentioned in the same message
+        const dateMatch = text.match(/\b(spring|summer|fall|autumn|winter|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec|next\s+(week|month|year)|this\s+(week|month|year)|weekend|long weekend|\d+\s+(day|week|month)s?)\b/i);
+        if (dateMatch) detected.dates = dateMatch[0];
+        nextStep = "vibe";
         reply = {
           id: `m-${Date.now() + 1}`,
           role: "ai",
-          content: `${detected.destination} — beautiful pick. Are you traveling solo, as a couple, or with a group? And roughly when?`,
+          content: "Got it. What kind of vibe are you after — culture-heavy, food-forward, adventurous, slow & restful, party? Anything that resonates is fine.",
         };
-      } else if (!lower.match(/\b(food|culture|art|adventure|wellness|party|luxury|explore)\b/) && (!detected.travelerType || detected.travelerType.length === 0)) {
-        if (lower.match(/couple|2|two/)) detected.group = "2 adults";
-        else if (lower.match(/solo/)) detected.group = "Solo";
-        else if (lower.match(/family/)) detected.group = "Family with kids";
-        else if (lower.match(/friend/)) detected.group = "Friends (3-5)";
-        reply = {
-          id: `m-${Date.now() + 1}`,
-          role: "ai",
-          content: "Got it. What kind of vibe are you after — culture-heavy, food-forward, adventurous, slow & restful? Pick anything that resonates.",
-        };
-      } else {
-        const types = [];
-        if (lower.match(/food|culinary|eat/)) types.push("Food Lover");
-        if (lower.match(/culture|art|museum|history/)) types.push("Culture Seeker");
-        if (lower.match(/adventure|hike|outdoor/)) types.push("Adventure Seeker");
-        if (lower.match(/wellness|relax|spa|yoga/)) types.push("Wellness Traveller");
-        if (lower.match(/luxury|premium/)) types.push("Luxury Traveller");
-        if (lower.match(/party|nightlife/)) types.push("Party Animal");
-        if (types.length === 0) types.push("Explorer");
-        detected.travelerType = types;
-        triggerConfirm = true;
+      } else if (intakeStep === "vibe") {
+        const types = detectTravelerTypes(lower);
+        detected.travelerType = types.length > 0 ? types : ["Explorer"];
+        // Pick up budget if mentioned
+        const budgetMatch = text.match(/\$[\d,kK]+(\s*[-–to]+\s*\$?[\d,kK]+)?/);
+        if (budgetMatch) detected.budget = budgetMatch[0];
+        nextStep = "done";
         reply = {
           id: `m-${Date.now() + 1}`,
           role: "ai",
           content: "Perfect — let me read this back to make sure I have it right.",
         };
+      } else {
+        // 'done' but user keeps chatting before confirming — gently nudge to confirm or restart
+        reply = {
+          id: `m-${Date.now() + 1}`,
+          role: "ai",
+          content: "I have what I need — tap 'Yes, generate it' above when you're ready, or tell me what to change.",
+        };
       }
 
       setIntake(detected);
+      setIntakeStep(nextStep);
       setMessages((m) => [...m, reply]);
 
-      if (triggerConfirm) {
+      if (nextStep === "done") {
         setTimeout(() => {
           setConfirmSummary([
             { label: "Destination", value: detected.destination },
@@ -151,6 +214,7 @@ const Chat = () => {
   const handleWizardComplete = (data) => {
     setMode("chat");
     setIntake(data);
+    setIntakeStep("done");
     setConfirmSummary([
       { label: "Destination", value: data.destination },
       { label: "When", value: data.dates },
