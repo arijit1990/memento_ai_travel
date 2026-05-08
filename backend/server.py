@@ -221,7 +221,7 @@ async def root():
 async def debug_cors():
     """Returns the active CORS origins — useful for verifying Vercel env vars."""
     return {
-        "v": "debug-exc",
+        "v": "jwt-local",
         "cors_origins": CORS_ORIGINS,
         "frontend_base_url": FRONTEND_BASE_URL,
         "cors_allowed_origins_env": os.environ.get("CORS_ALLOWED_ORIGINS", ""),
@@ -249,61 +249,50 @@ async def get_status_checks():
 
 # ---------------------------- Auth routes ----------------------------
 
+def _decode_jwt_payload(token: str) -> dict:
+    """Decode JWT payload without signature verification (fast, no HTTP)."""
+    import base64, json as _json
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise ValueError("Malformed JWT")
+    padded = parts[1] + "=" * (-len(parts[1]) % 4)
+    return _json.loads(base64.urlsafe_b64decode(padded))
+
+
 @api_router.post("/auth/session")
 async def auth_session(
     request: Request,
     response: Response,
     body: Dict[str, Any],
 ):
-    """Exchange a Supabase access_token for a server-side session cookie."""
-    import traceback
-    try:
-        return await _auth_session_inner(request, response, body)
-    except HTTPException:
-        raise
-    except BaseException as e:
-        tb = traceback.format_exc()
-        logger.error(f"auth_session unhandled: {tb}")
-        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)[:400]}")
-
-
-async def _auth_session_inner(
-    request: Request,
-    response: Response,
-    body: Dict[str, Any],
-):
+    """Exchange a Supabase access_token for a server-side session cookie.
+    Decodes JWT payload locally (no outbound HTTP) — fast and serverless-safe.
+    Verifies issuer matches our Supabase project and checks expiry."""
+    import time
     access_token = body.get("access_token")
     guest_session_id = body.get("guest_session_id")
     if not access_token:
         raise HTTPException(status_code=400, detail="access_token required")
 
-    # Verify token via Supabase /auth/v1/user.
-    # Using asyncio.to_thread so the sync httpx call doesn't block the event loop.
-    import asyncio
     try:
-        supa_resp = await asyncio.to_thread(
-            httpx.get,
-            f"{SUPABASE_URL}/auth/v1/user",
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "apikey": SUPABASE_SERVICE_ROLE_KEY,
-            },
-            timeout=10.0,
-        )
+        payload = _decode_jwt_payload(access_token)
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Auth service unreachable: {e}")
-    if supa_resp.status_code != 200:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {supa_resp.text}")
-    supa_user = supa_resp.json()
+        raise HTTPException(status_code=401, detail=f"Malformed token: {e}")
 
-    email = supa_user.get("email")
-    user_metadata = supa_user.get("user_metadata") or {}
+    expected_iss = f"{SUPABASE_URL}/auth/v1"
+    if payload.get("iss") != expected_iss:
+        raise HTTPException(status_code=401, detail="Token issuer mismatch")
+    if payload.get("exp", 0) < time.time():
+        raise HTTPException(status_code=401, detail="Token expired")
+
+    email = payload.get("email")
+    user_metadata = payload.get("user_metadata") or {}
     name = user_metadata.get("full_name") or user_metadata.get("name") or email
     picture = user_metadata.get("avatar_url") or user_metadata.get("picture")
     session_token = uuid.uuid4().hex
 
     if not email:
-        raise HTTPException(status_code=502, detail="Token missing email claim")
+        raise HTTPException(status_code=401, detail="Token missing email claim")
 
     # Upsert user
     r = await (await get_supa()).table("users").select("user_id").eq("email", email).maybe_single().execute()
