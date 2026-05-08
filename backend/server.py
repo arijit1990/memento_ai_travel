@@ -3,7 +3,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Respons
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
+from supabase import create_async_client, AsyncClient
 import os
 import json
 import logging
@@ -20,21 +20,19 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 # Fail fast with clear messages if required env vars are missing
-_REQUIRED_ENV = ["MONGO_URL", "DB_NAME", "GOOGLE_AI_KEY", "SUPABASE_JWT_SECRET"]
+_REQUIRED_ENV = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "GOOGLE_AI_KEY", "SUPABASE_JWT_SECRET"]
 for _key in _REQUIRED_ENV:
     if not os.environ.get(_key):
         raise RuntimeError(f"Required environment variable '{_key}' is not set. Check your .env file.")
 
-# MongoDB connection
-mongo_url = os.environ["MONGO_URL"]
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ["DB_NAME"]]
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
 GOOGLE_AI_KEY = os.environ.get("GOOGLE_AI_KEY")
 # Provider keys — only needed when the corresponding provider is active
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-# Supabase JWT secret — used to verify access tokens locally (no outbound HTTP call)
+# Supabase JWT secret — used to verify user tokens locally (no outbound HTTP call)
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET")
 EXPORT_WEBHOOK_URL = os.environ.get("EXPORT_WEBHOOK_URL")
 FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
@@ -47,11 +45,15 @@ LLM_FALLBACK_MODEL = os.environ.get("LLM_FALLBACK_MODEL", "gpt-4o")
 LLM_INTAKE_PROVIDER = os.environ.get("LLM_INTAKE_PROVIDER", "gemini")
 LLM_INTAKE_MODEL = os.environ.get("LLM_INTAKE_MODEL", "gemini-2.5-flash")
 
+# Supabase async client — initialised in lifespan, used throughout
+supa: AsyncClient = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global supa
+    supa = await create_async_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
     yield
-    client.close()
 
 
 app = FastAPI(title="Memento API", lifespan=lifespan)
@@ -134,7 +136,8 @@ async def get_current_user(
     if not token:
         return None
 
-    sess = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
+    r = await supa.table("user_sessions").select("*").eq("session_token", token).maybe_single().execute()
+    sess = r.data
     if not sess:
         return None
 
@@ -146,8 +149,8 @@ async def get_current_user(
     if expires_at and expires_at < datetime.now(timezone.utc):
         return None
 
-    user = await db.users.find_one({"user_id": sess["user_id"]}, {"_id": 0})
-    return user
+    r = await supa.table("users").select("*").eq("user_id", sess["user_id"]).maybe_single().execute()
+    return r.data
 
 
 async def require_user(
@@ -172,13 +175,14 @@ async def create_status_check(input: StatusCheckCreate):
     status_obj = StatusCheck(**input.model_dump())
     doc = status_obj.model_dump()
     doc["timestamp"] = doc["timestamp"].isoformat()
-    await db.status_checks.insert_one(doc)
+    await supa.table("status_checks").insert(doc).execute()
     return status_obj
 
 
 @api_router.get("/status", response_model=List[StatusCheck])
 async def get_status_checks():
-    rows = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
+    result = await supa.table("status_checks").select("*").limit(1000).execute()
+    rows = result.data
     for r in rows:
         if isinstance(r.get("timestamp"), str):
             r["timestamp"] = datetime.fromisoformat(r["timestamp"])
@@ -224,31 +228,29 @@ async def auth_session(
         raise HTTPException(status_code=502, detail="Token missing email claim")
 
     # Upsert user
-    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    r = await supa.table("users").select("user_id").eq("email", email).maybe_single().execute()
+    existing = r.data
     if existing:
         user_id = existing["user_id"]
-        await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": {"name": name, "picture": picture}},
-        )
+        await supa.table("users").update({"name": name, "picture": picture}).eq("user_id", user_id).execute()
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
-        await db.users.insert_one({
+        await supa.table("users").insert({
             "user_id": user_id,
             "email": email,
             "name": name,
             "picture": picture,
             "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        }).execute()
 
     # Store session (7 days)
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-    await db.user_sessions.insert_one({
+    await supa.table("user_sessions").insert({
         "user_id": user_id,
         "session_token": session_token,
         "expires_at": expires_at.isoformat(),
         "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    }).execute()
 
     # Set httpOnly cookie — this is the sole credential mechanism for browsers.
     response.set_cookie(
@@ -264,15 +266,14 @@ async def auth_session(
     # Claim guest trips if requested
     claimed = 0
     if guest_session_id:
-        result = await db.trips.update_many(
-            {"guest_session_id": guest_session_id, "user_id": None},
-            {"$set": {"user_id": user_id, "guest_session_id": None}},
-        )
-        claimed = result.modified_count
+        r = await supa.table("trips").update(
+            {"user_id": user_id, "guest_session_id": None}
+        ).eq("guest_session_id", guest_session_id).is_("user_id", "null").execute()
+        claimed = len(r.data)
 
-    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    r = await supa.table("users").select("*").eq("user_id", user_id).maybe_single().execute()
     # session_token intentionally omitted from response body — only in httpOnly cookie.
-    return {"user": user_doc, "trips_claimed": claimed}
+    return {"user": r.data, "trips_claimed": claimed}
 
 
 @api_router.get("/auth/me")
@@ -287,7 +288,7 @@ async def auth_logout(
     session_token: Optional[str] = Cookie(default=None),
 ):
     if session_token:
-        await db.user_sessions.delete_one({"session_token": session_token})
+        await supa.table("user_sessions").delete().eq("session_token", session_token).execute()
     response.delete_cookie("session_token", path="/")
     return {"ok": True}
 
@@ -297,11 +298,10 @@ async def claim_guest(
     body: ClaimGuestRequest,
     user: Dict[str, Any] = Depends(require_user),
 ):
-    result = await db.trips.update_many(
-        {"guest_session_id": body.guest_session_id, "user_id": None},
-        {"$set": {"user_id": user["user_id"], "guest_session_id": None}},
-    )
-    return {"claimed": result.modified_count}
+    r = await supa.table("trips").update(
+        {"user_id": user["user_id"], "guest_session_id": None}
+    ).eq("guest_session_id", body.guest_session_id).is_("user_id", "null").execute()
+    return {"claimed": len(r.data)}
 
 
 # ---------------------------- Trip generation (LLM) ----------------------------
@@ -497,7 +497,7 @@ async def generate_trip(
         "created_at": datetime.now(timezone.utc).isoformat(),
         "trip": {**trip_json, "id": trip_id, "cover": None},
     }
-    await db.trips.insert_one(doc)
+    await supa.table("trips").insert(doc).execute()
 
     return {"trip_id": trip_id, "trip": doc["trip"], "model": used_model}
 
@@ -603,7 +603,7 @@ async def generate_trip_stream(
             "created_at": datetime.now(timezone.utc).isoformat(),
             "trip": {**trip_json, "id": trip_id, "cover": None},
         }
-        await db.trips.insert_one(doc)
+        await supa.table("trips").insert(doc).execute()
         yield evt({"type": "done", "trip_id": trip_id, "trip": doc["trip"], "model": used_model})
 
     return StreamingResponse(
@@ -626,14 +626,13 @@ async def list_trips(
     session_token: Optional[str] = Cookie(default=None),
 ):
     user = await get_current_user(request, session_token)
-    if user:
-        q = {"user_id": user["user_id"]}
-    elif guest_session_id:
-        q = {"guest_session_id": guest_session_id, "user_id": None}
-    else:
+    if not user and not guest_session_id:
         return {"trips": []}
-
-    rows = await db.trips.find(q, {"_id": 0}).sort("created_at", -1).to_list(100)
+    if user:
+        result = await supa.table("trips").select("*").eq("user_id", user["user_id"]).order("created_at", desc=True).limit(100).execute()
+    else:
+        result = await supa.table("trips").select("*").eq("guest_session_id", guest_session_id).is_("user_id", "null").order("created_at", desc=True).limit(100).execute()
+    rows = result.data
     summaries = []
     for r in rows:
         t = r.get("trip", {})
@@ -657,7 +656,8 @@ async def get_trip(
     guest_session_id: Optional[str] = None,
     session_token: Optional[str] = Cookie(default=None),
 ):
-    row = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    r = await supa.table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
+    row = r.data
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
 
@@ -679,7 +679,8 @@ async def delete_trip(
     guest_session_id: Optional[str] = None,
     session_token: Optional[str] = Cookie(default=None),
 ):
-    row = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    r = await supa.table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
+    row = r.data
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
     user = await get_current_user(request, session_token)
@@ -689,7 +690,7 @@ async def delete_trip(
     else:
         if row.get("guest_session_id") != guest_session_id:
             raise HTTPException(status_code=403, detail="Not your trip")
-    await db.trips.delete_one({"trip_id": trip_id})
+    await supa.table("trips").delete().eq("trip_id", trip_id).execute()
     return {"ok": True}
 
 
@@ -807,7 +808,8 @@ async def edit_trip(
     guest_session_id: Optional[str] = None,
     session_token: Optional[str] = Cookie(default=None),
 ):
-    row = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    r = await supa.table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
+    row = r.data
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
     user = await get_current_user(request, session_token)
@@ -847,10 +849,9 @@ async def edit_trip(
     new_trip["id"] = trip_id
     new_trip["cover"] = row["trip"].get("cover")
 
-    await db.trips.update_one(
-        {"trip_id": trip_id},
-        {"$set": {"trip": new_trip, "updated_at": datetime.now(timezone.utc).isoformat(), "last_model": used_model}},
-    )
+    await supa.table("trips").update(
+        {"trip": new_trip, "updated_at": datetime.now(timezone.utc).isoformat(), "last_model": used_model}
+    ).eq("trip_id", trip_id).execute()
     return {"trip": new_trip, "model": used_model}
 
 
@@ -863,7 +864,8 @@ async def create_share(
     guest_session_id: Optional[str] = None,
     session_token: Optional[str] = Cookie(default=None),
 ):
-    row = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    r = await supa.table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
+    row = r.data
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
     user = await get_current_user(request, session_token)
@@ -875,20 +877,22 @@ async def create_share(
             raise HTTPException(status_code=403, detail="Not your trip")
 
     token = uuid.uuid4().hex[:18]
-    await db.shares.insert_one({
+    await supa.table("shares").insert({
         "token": token,
         "trip_id": trip_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    }).execute()
     return {"token": token}
 
 
 @api_router.get("/share/{token}")
 async def read_share(token: str):
-    s = await db.shares.find_one({"token": token}, {"_id": 0})
+    r = await supa.table("shares").select("*").eq("token", token).maybe_single().execute()
+    s = r.data
     if not s:
         raise HTTPException(status_code=404, detail="Share not found")
-    row = await db.trips.find_one({"trip_id": s["trip_id"]}, {"_id": 0})
+    r = await supa.table("trips").select("*").eq("trip_id", s["trip_id"]).maybe_single().execute()
+    row = r.data
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
     return {"trip": row["trip"], "shared_at": s.get("created_at")}
@@ -903,14 +907,13 @@ async def list_saved(
     session_token: Optional[str] = Cookie(default=None),
 ):
     user = await get_current_user(request, session_token)
-    if user:
-        q = {"user_id": user["user_id"]}
-    elif guest_session_id:
-        q = {"guest_session_id": guest_session_id, "user_id": None}
-    else:
+    if not user and not guest_session_id:
         return {"items": []}
-    items = await db.saved_items.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
-    return {"items": items}
+    if user:
+        result = await supa.table("saved_items").select("*").eq("user_id", user["user_id"]).order("created_at", desc=True).limit(200).execute()
+    else:
+        result = await supa.table("saved_items").select("*").eq("guest_session_id", guest_session_id).is_("user_id", "null").order("created_at", desc=True).limit(200).execute()
+    return {"items": result.data}
 
 
 @api_router.post("/saved")
@@ -938,8 +941,8 @@ async def create_saved(
         "trip_id": body.trip_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.saved_items.insert_one(doc)
-    return {"item": {k: v for k, v in doc.items() if k != "_id"}}
+    await supa.table("saved_items").insert(doc).execute()
+    return {"item": doc}
 
 
 @api_router.delete("/saved/{item_id}")
@@ -949,7 +952,8 @@ async def delete_saved(
     guest_session_id: Optional[str] = None,
     session_token: Optional[str] = Cookie(default=None),
 ):
-    item = await db.saved_items.find_one({"id": item_id}, {"_id": 0})
+    r = await supa.table("saved_items").select("*").eq("id", item_id).maybe_single().execute()
+    item = r.data
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     user = await get_current_user(request, session_token)
@@ -959,7 +963,7 @@ async def delete_saved(
     else:
         if item.get("guest_session_id") != guest_session_id:
             raise HTTPException(status_code=403, detail="Not yours")
-    await db.saved_items.delete_one({"id": item_id})
+    await supa.table("saved_items").delete().eq("id", item_id).execute()
     return {"ok": True}
 
 
@@ -979,7 +983,8 @@ async def export_trip(
     if not EXPORT_WEBHOOK_URL:
         raise HTTPException(status_code=503, detail="Export webhook not configured")
 
-    row = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    r = await supa.table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
+    row = r.data
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
 
@@ -992,14 +997,15 @@ async def export_trip(
             raise HTTPException(status_code=403, detail="Not your trip")
 
     # Ensure a share token exists so the email can include a public link
-    share = await db.shares.find_one({"trip_id": trip_id}, {"_id": 0})
+    r = await supa.table("shares").select("token").eq("trip_id", trip_id).maybe_single().execute()
+    share = r.data
     if not share:
         token = uuid.uuid4().hex[:18]
-        await db.shares.insert_one({
+        await supa.table("shares").insert({
             "token": token,
             "trip_id": trip_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        }).execute()
     else:
         token = share["token"]
 
@@ -1020,7 +1026,7 @@ async def export_trip(
         logging.exception("Export webhook failed")
         raise HTTPException(status_code=502, detail=f"Webhook delivery failed: {e}")
 
-    await db.exports.insert_one({
+    await supa.table("exports").insert({
         "trip_id": trip_id,
         "email": body.email,
         "webhook_status": webhook_status,
