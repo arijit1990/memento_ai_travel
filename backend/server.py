@@ -76,9 +76,12 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Memento API", lifespan=lifespan)
 
 # CORS must be added BEFORE routers are included so it wraps all routes.
+# allow_origin_regex covers Vercel preview + production URLs automatically,
+# removing the need to configure CORS_ALLOWED_ORIGINS per deployment.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
+    allow_origin_regex=r"https://[a-zA-Z0-9\-]+\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
