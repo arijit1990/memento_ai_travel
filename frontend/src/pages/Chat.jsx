@@ -91,13 +91,17 @@ const Chat = () => {
         }, 400);
       }
     } catch (e) {
-      const msg = e?.response?.data?.detail || "Network blip";
+      const msg =
+        e?.response?.data?.detail ||
+        e?.message ||
+        "Could not reach the backend";
+      console.error("[intake] API call failed:", e);
       setMessages((m) => [
         ...m,
         {
           id: `m-${Date.now() + 1}`,
           role: "ai",
-          content: `Hmm, I missed that — could you say that again? (${msg})`,
+          content: `Hmm, I hit a snag — ${msg}. Could you try again?`,
         },
       ]);
     } finally {
