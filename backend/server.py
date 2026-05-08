@@ -228,6 +228,46 @@ async def debug_cors():
     }
 
 
+@api_router.post("/debug/auth-steps")
+async def debug_auth_steps(body: Dict[str, Any]):
+    """Step-through debug for auth/session user upsert."""
+    import traceback, time
+    email = body.get("email", "debug@test.com")
+    steps = []
+    try:
+        steps.append("get_supa")
+        sc = await get_supa()
+        steps.append("select_user")
+        r = await sc.table("users").select("user_id").eq("email", email).maybe_single().execute()
+        steps.append(f"select_done existing={r.data}")
+        if not r.data:
+            steps.append("insert_user")
+            user_id = f"user_{uuid.uuid4().hex[:12]}"
+            await sc.table("users").insert({
+                "user_id": user_id,
+                "email": email,
+                "name": "Debug User",
+                "picture": None,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }).execute()
+            steps.append("insert_done")
+        else:
+            user_id = r.data["user_id"]
+            steps.append(f"existing_user={user_id}")
+        steps.append("insert_session")
+        expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+        await sc.table("user_sessions").insert({
+            "user_id": user_id,
+            "session_token": uuid.uuid4().hex,
+            "expires_at": expires_at.isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+        steps.append("all_done")
+        return {"ok": True, "steps": steps}
+    except BaseException as e:
+        return {"ok": False, "steps": steps, "error": f"{type(e).__name__}: {e}", "tb": traceback.format_exc()[-500:]}
+
+
 @api_router.post("/status", response_model=StatusCheck)
 async def create_status_check(input: StatusCheckCreate):
     status_obj = StatusCheck(**input.model_dump())
