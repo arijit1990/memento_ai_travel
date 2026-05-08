@@ -255,25 +255,30 @@ async def auth_session(
     body: Dict[str, Any],
 ):
     """Exchange a Supabase access_token for a server-side session cookie.
-    Uses supabase.auth.get_user() to verify the token — works with any JWT algorithm
-    (HS256 or RS256) and any Supabase version.
+    Verifies via direct httpx call to Supabase /auth/v1/user — avoids async client
+    issues on Vercel serverless and works with any JWT algorithm.
     Optionally claims a guest_session_id's trips on first sign-in."""
     access_token = body.get("access_token")
     guest_session_id = body.get("guest_session_id")
     if not access_token:
         raise HTTPException(status_code=400, detail="access_token required")
 
-    # Verify token via Supabase admin client — handles RS256/HS256 automatically
-    try:
-        user_resp = await (await get_supa()).auth.get_user(access_token)
-        supa_user = user_resp.user
-        if not supa_user:
-            raise ValueError("No user returned")
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+    # Verify token by calling Supabase auth API directly with httpx.
+    # This avoids supabase-py async client issues on Vercel serverless cold starts.
+    async with httpx.AsyncClient(timeout=10.0) as hx:
+        r = await hx.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "apikey": SUPABASE_SERVICE_ROLE_KEY,
+            },
+        )
+    if r.status_code != 200:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {r.text}")
+    supa_user = r.json()
 
-    email = supa_user.email
-    user_metadata = supa_user.user_metadata or {}
+    email = supa_user.get("email")
+    user_metadata = supa_user.get("user_metadata") or {}
     name = user_metadata.get("full_name") or user_metadata.get("name") or email
     picture = user_metadata.get("avatar_url") or user_metadata.get("picture")
     session_token = uuid.uuid4().hex
