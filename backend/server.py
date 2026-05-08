@@ -31,8 +31,9 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
 
 GOOGLE_AI_KEY = os.environ.get("GOOGLE_AI_KEY")
-# ANTHROPIC_API_KEY is only needed if LLM_FALLBACK_PROVIDER=anthropic (optional)
+# Provider keys — only needed when the corresponding provider is active
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 # EMERGENT_AUTH_BASE is required — no hardcoded default so Vercel deployments are explicit
 EMERGENT_AUTH_BASE = os.environ.get("EMERGENT_AUTH_BASE")
 EXPORT_WEBHOOK_URL = os.environ.get("EXPORT_WEBHOOK_URL")
@@ -41,8 +42,8 @@ FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
 # LLM model config — override via env vars for A/B testing or provider switching
 LLM_PRIMARY_PROVIDER = os.environ.get("LLM_PRIMARY_PROVIDER", "gemini")
 LLM_PRIMARY_MODEL = os.environ.get("LLM_PRIMARY_MODEL", "gemini-2.5-flash")
-LLM_FALLBACK_PROVIDER = os.environ.get("LLM_FALLBACK_PROVIDER", "anthropic")
-LLM_FALLBACK_MODEL = os.environ.get("LLM_FALLBACK_MODEL", "claude-sonnet-4-5-20250929")
+LLM_FALLBACK_PROVIDER = os.environ.get("LLM_FALLBACK_PROVIDER", "openai")
+LLM_FALLBACK_MODEL = os.environ.get("LLM_FALLBACK_MODEL", "gpt-4o")
 LLM_INTAKE_PROVIDER = os.environ.get("LLM_INTAKE_PROVIDER", "gemini")
 LLM_INTAKE_MODEL = os.environ.get("LLM_INTAKE_MODEL", "gemini-2.5-flash")
 
@@ -384,11 +385,27 @@ async def _call_anthropic(model: str, system_prompt: str, user_prompt: str) -> s
     return msg.content[0].text
 
 
+async def _call_openai(model: str, system_prompt: str, user_prompt: str) -> str:
+    import openai
+    o_client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
+    response = await o_client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        max_tokens=8192,
+    )
+    return response.choices[0].message.content
+
+
 async def _call_provider(provider: str, model: str, system_prompt: str, user_prompt: str) -> str:
     if provider == "gemini":
         return await _call_google(model, system_prompt, user_prompt)
     if provider == "anthropic":
         return await _call_anthropic(model, system_prompt, user_prompt)
+    if provider == "openai":
+        return await _call_openai(model, system_prompt, user_prompt)
     raise ValueError(f"Unknown LLM provider: {provider!r}")
 
 
