@@ -172,6 +172,13 @@ async def get_supa() -> AsyncClient:
     return supa
 
 
+def _d(r: Any) -> Any:
+    """Extract .data from a Supabase APIResponse.
+    maybe_single() returns None (not APIResponse) when no row found on some
+    supabase-py versions, so we guard here instead of at every call site."""
+    return r.data if r is not None else None
+
+
 # ---------------------------- Auth helpers ----------------------------
 
 async def get_current_user(
@@ -184,7 +191,7 @@ async def get_current_user(
         return None
 
     r = await (await get_supa()).table("user_sessions").select("*").eq("session_token", token).maybe_single().execute()
-    sess = r.data
+    sess = _d(r)
     if not sess:
         return None
 
@@ -197,7 +204,7 @@ async def get_current_user(
         return None
 
     r = await (await get_supa()).table("users").select("*").eq("user_id", sess["user_id"]).maybe_single().execute()
-    return r.data
+    return _d(r)
 
 
 async def require_user(
@@ -221,7 +228,7 @@ async def root():
 async def debug_cors():
     """Returns the active CORS origins — useful for verifying Vercel env vars."""
     return {
-        "v": "jwt-local",
+        "v": "maybe-single-fix",
         "cors_origins": CORS_ORIGINS,
         "frontend_base_url": FRONTEND_BASE_URL,
         "cors_allowed_origins_env": os.environ.get("CORS_ALLOWED_ORIGINS", ""),
@@ -336,7 +343,7 @@ async def auth_session(
 
     # Upsert user
     r = await (await get_supa()).table("users").select("user_id").eq("email", email).maybe_single().execute()
-    existing = r.data
+    existing = _d(r)
     if existing:
         user_id = existing["user_id"]
         await (await get_supa()).table("users").update({"name": name, "picture": picture}).eq("user_id", user_id).execute()
@@ -380,7 +387,7 @@ async def auth_session(
 
     r = await (await get_supa()).table("users").select("*").eq("user_id", user_id).maybe_single().execute()
     # session_token intentionally omitted from response body — only in httpOnly cookie.
-    return {"user": r.data, "trips_claimed": claimed}
+    return {"user": _d(r), "trips_claimed": claimed}
 
 
 @api_router.get("/auth/me")
@@ -764,7 +771,7 @@ async def get_trip(
     session_token: Optional[str] = Cookie(default=None),
 ):
     r = await (await get_supa()).table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
-    row = r.data
+    row = _d(r)
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
 
@@ -787,7 +794,7 @@ async def delete_trip(
     session_token: Optional[str] = Cookie(default=None),
 ):
     r = await (await get_supa()).table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
-    row = r.data
+    row = _d(r)
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
     user = await get_current_user(request, session_token)
@@ -916,7 +923,7 @@ async def edit_trip(
     session_token: Optional[str] = Cookie(default=None),
 ):
     r = await (await get_supa()).table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
-    row = r.data
+    row = _d(r)
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
     user = await get_current_user(request, session_token)
@@ -972,7 +979,7 @@ async def create_share(
     session_token: Optional[str] = Cookie(default=None),
 ):
     r = await (await get_supa()).table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
-    row = r.data
+    row = _d(r)
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
     user = await get_current_user(request, session_token)
@@ -995,11 +1002,11 @@ async def create_share(
 @api_router.get("/share/{token}")
 async def read_share(token: str):
     r = await (await get_supa()).table("shares").select("*").eq("token", token).maybe_single().execute()
-    s = r.data
+    s = _d(r)
     if not s:
         raise HTTPException(status_code=404, detail="Share not found")
     r = await (await get_supa()).table("trips").select("*").eq("trip_id", s["trip_id"]).maybe_single().execute()
-    row = r.data
+    row = _d(r)
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
     return {"trip": row["trip"], "shared_at": s.get("created_at")}
@@ -1060,7 +1067,7 @@ async def delete_saved(
     session_token: Optional[str] = Cookie(default=None),
 ):
     r = await (await get_supa()).table("saved_items").select("*").eq("id", item_id).maybe_single().execute()
-    item = r.data
+    item = _d(r)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     user = await get_current_user(request, session_token)
@@ -1091,7 +1098,7 @@ async def export_trip(
         raise HTTPException(status_code=503, detail="Export webhook not configured")
 
     r = await (await get_supa()).table("trips").select("*").eq("trip_id", trip_id).maybe_single().execute()
-    row = r.data
+    row = _d(r)
     if not row:
         raise HTTPException(status_code=404, detail="Trip not found")
 
@@ -1105,7 +1112,7 @@ async def export_trip(
 
     # Ensure a share token exists so the email can include a public link
     r = await (await get_supa()).table("shares").select("token").eq("trip_id", trip_id).maybe_single().execute()
-    share = r.data
+    share = _d(r)
     if not share:
         token = uuid.uuid4().hex[:18]
         await (await get_supa()).table("shares").insert({
@@ -1178,3 +1185,4 @@ async def booking_prices(ids: str):
 # ---------------------------- App wiring ----------------------------
 
 app.include_router(api_router)
+
